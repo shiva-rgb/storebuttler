@@ -406,11 +406,14 @@ async function createOrder(orderData, userId = null) {
 }
 
 /**
- * Update order status (filtered by current store)
+ * Update order status (filtered by user_id)
  */
-async function updateOrderStatus(id, updates) {
+async function updateOrderStatus(id, updates, userId) {
   try {
-    const storeName = await getCurrentStoreName();
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
     const fields = [];
     const values = [];
     let paramCount = 1;
@@ -424,19 +427,38 @@ async function updateOrderStatus(id, updates) {
     });
 
     if (fields.length === 0) {
-      return await getAllOrders().then(orders => orders.find(o => o.id === id));
+      // If no updates, just return the order if it exists for this user
+      const orderResult = await pool.query(
+        'SELECT * FROM orders WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+      if (orderResult.rows.length === 0) {
+        return null;
+      }
+      const order = orderResult.rows[0];
+      const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [id]);
+      return {
+        id: order.id,
+        items: itemsResult.rows.map(item => ({
+          productId: item.product_id,
+          quantity: item.quantity,
+          productName: item.product_name,
+          productPrice: parseFloat(item.product_price)
+        })),
+        customerInfo: {
+          name: order.customer_name,
+          email: order.customer_email,
+          phone: order.customer_phone,
+          address: order.customer_address
+        },
+        status: order.status,
+        createdAt: order.created_at.toISOString(),
+        total: parseFloat(order.total)
+      };
     }
 
-    values.push(id);
-    let query = `UPDATE orders SET ${fields.join(', ')} WHERE id = $${paramCount}`;
-    
-    if (storeName) {
-      paramCount++;
-      query += ` AND store_name = $${paramCount}`;
-      values.push(storeName);
-    }
-    
-    query += ' RETURNING *';
+    values.push(id, userId);
+    const query = `UPDATE orders SET ${fields.join(', ')} WHERE id = $${paramCount} AND user_id = $${paramCount + 1} RETURNING *`;
     
     const result = await pool.query(query, values);
     if (result.rows.length === 0) {
@@ -551,6 +573,7 @@ async function getStoreDetails(userId) {
       gstin: row.gstin || '',
       upiId: row.upi_id || '',
       instructions: row.instructions || '',
+      isLive: row.is_live || false,
       updatedAt: row.updated_at ? row.updated_at.toISOString() : null
     };
   } catch (error) {

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Martify - Admin Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🛒 Martify</h1>
+            <nav>
+                <a href="admin.html" class="active">Admin</a>
+                <button onclick="openAboutUs()" style="background: none; border: none; color: #333; font-weight: 500; font-size: 1em; cursor: pointer; margin-left: 20px; padding: 0;">About Us</button>
+                <button onclick="logout()" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; margin-left: 10px;">Logout</button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('inventory', this)">Inventory</button>
+            <button class="tab-btn" onclick="switchTab('orders', this)">Orders</button>
+            <button class="tab-btn" onclick="switchTab('payment', this)">Store Details</button>
+        </div>
+
+        <!-- Inventory Tab -->
+        <div id="inventory-tab" class="tab-content active">
+            <div class="admin-section">
+                <h2>Upload Inventory</h2>
+                <div class="upload-box">
+                    <p>Upload an Excel file (.xlsx or .xls) or CSV file (.csv) with your inventory. Expected columns:</p>
+                    <ul>
+                        <li><strong>Product Name</strong> (or Name, Product, Item)</li>
+                        <li><strong>Price</strong> (or Cost, Unit Price)</li>
+                        <li><strong>Quantity</strong> (or Stock, Qty)</li>
+                        <li><strong>Unit</strong> (or Units) - e.g., kg, gram, piece, liter</li>
+                        <li><strong>Category</strong> (or Type) - Optional</li>
+                        <li><strong>Description</strong> (or Details) - Optional</li>
+                        <li><strong>Image</strong> (or Image URL) - Optional</li>
+                    </ul>
+                    <div style="margin: 20px 0; padding: 15px; background: #f0f7ff; border-left: 4px solid #667eea; border-radius: 5px;">
+                        <p style="margin: 0 0 10px 0; font-weight: 600; color: #333;">📥 Download Sample File</p>
+                        <p style="margin: 0 0 15px 0; color: #666; font-size: 0.95em;">Use this sample file as a reference to format your inventory correctly.</p>
+                        <p style="margin: 0 0 15px 0; color: #666; font-size: 0.95em;">*If image url is not availble please keep it blank.*</p>
+                        <a href="sample-inventory.csv" download="sample-inventory.csv" class="download-sample-btn">
+                            📄 Download Sample CSV
+                        </a>
+                    </div>
+                    <form id="upload-form" enctype="multipart/form-data">
+                        <input type="file" id="file-input" accept=".xlsx,.xls,.csv" required>
+                        <button type="submit" class="upload-btn">Upload File</button>
+                    </form>
+                    <div id="upload-status"></div>
+                    <p style="margin-top: 15px; color: #666; font-size: 0.9em; font-style: italic;">
+                        💡 <strong>Tip:</strong> Use the sample Excel/CSV file as a reference before uploading your inventory. Make sure your file has the correct column headers and data format.
+                    </p>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <h2>Inventory Management</h2>
+                <div class="inventory-controls">
+                    <button onclick="openAddModal()" class="add-btn">+ Add Product</button>
+                    <button onclick="loadInventory()" class="refresh-btn">Refresh</button>
+                    <input type="text" id="search-inventory" placeholder="Search products..." oninput="filterInventory()">
+                    <button onclick="deleteSelected()" class="delete-selected-btn" id="delete-selected-btn" disabled>Delete Selected</button>
+                    <button onclick="clearFilters()" class="clear-filters-btn">Clear Filters</button>
+                </div>
+                <div class="inventory-table-container">
+                    <table class="inventory-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></th>
+                                <th class="sortable" onclick="sortInventory('name')">
+                                    Name <span class="sort-indicator" id="sort-name"></span>
+                                </th>
+                                <th class="sortable" onclick="sortInventory('price')">
+                                    Price <span class="sort-indicator" id="sort-price"></span>
+                                </th>
+                                <th>Units</th>
+                                <th class="sortable" onclick="sortInventory('quantity')">
+                                    Stock <span class="sort-indicator" id="sort-quantity"></span>
+                                </th>
+                                <th class="sortable" onclick="sortInventory('category')">
+                                    Category <span class="sort-indicator" id="sort-category"></span>
+                                </th>
+                                <th>Actions</th>
+                            </tr>
+                            <tr class="filter-row">
+                                <th></th>
+                                <th><input type="text" class="filter-input" id="filter-name" placeholder="Filter name..." oninput="filterInventory()"></th>
+                                <th>
+                                    <select class="filter-input" id="filter-price" onchange="filterInventory()">
+                                        <option value="">All Prices</option>
+                                        <option value="0-50">₹0 - ₹50</option>
+                                        <option value="50-100">₹50 - ₹100</option>
+                                        <option value="100-200">₹100 - ₹200</option>
+                                        <option value="200+">₹200+</option>
+                                    </select>
+                                </th>
+                                <th><input type="text" class="filter-input" id="filter-unit" placeholder="Filter unit..." oninput="filterInventory()"></th>
+                                <th>
+                                    <select class="filter-input" id="filter-quantity" onchange="filterInventory()">
+                                        <option value="">All Stock</option>
+                                        <option value="0">Out of Stock</option>
+                                        <option value="1-10">1-10</option>
+                                        <option value="11-50">11-50</option>
+                                        <option value="51-100">51-100</option>
+                                        <option value="100+">100+</option>
+                                    </select>
+                                </th>
+                                <th>
+                                    <select class="filter-input" id="filter-category" onchange="filterInventory()">
+                                        <option value="">All Categories</option>
+                                    </select>
+                                </th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-table-body">
+                            <tr><td colspan="7" class="loading">Loading inventory...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="inventory-count" style="margin-top: 15px; padding: 10px; color: #666; font-size: 0.95em; text-align: center;"></div>
+            </div>
+        </div>
+
+        <!-- Orders Tab -->
+        <div id="orders-tab" class="tab-content">
+            <div class="admin-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Orders</h2>
+                    <button onclick="loadOrders()" class="refresh-btn">🔄 Refresh</button>
+                </div>
+                
+                <!-- Order Filters -->
+                <div style="margin-bottom: 20px;">
+                    <div class="filters">
+                        <div style="flex: 1;">
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #666;">Order ID</label>
+                            <input type="text" id="filter-order-id" placeholder="Search Order ID..." oninput="filterOrders()" style="width: 100%;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #666;">Status</label>
+                            <select id="filter-order-status" onchange="filterOrders()" style="width: 100%;">
+                                <option value="">All Status</option>
+                                <option value="pending">Pending</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #666;">Date From</label>
+                            <input type="date" id="filter-date-from" onchange="filterOrders()" style="width: 100%;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #666;">Date To</label>
+                            <input type="date" id="filter-date-to" onchange="filterOrders()" style="width: 100%;">
+                        </div>
+                        <div style="display: flex; align-items: flex-end;">
+                            <button onclick="clearOrderFilters()" class="clear-filters-btn" style="height: fit-content;">Clear Filters</button>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-bottom: 15px; color: #666; font-size: 0.9em;">
+                    <span id="orders-count"></span>
+                </div>
+                
+                <div class="orders-container" id="orders-container">
+                    <p class="loading">Loading orders...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Store Details Tab -->
+        <div id="payment-tab" class="tab-content">
+            <div class="admin-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Store Details</h2>
+                    <button onclick="loadPaymentSettings()" class="refresh-btn">🔄 Refresh</button>
+                </div>
+                <div class="payment-settings">
+                    <p style="margin-bottom: 20px; color: #666;">Configure your store information and payment details. Customers will see this information during checkout.</p>
+                    <form id="payment-form" onsubmit="savePaymentSettings(event)">
+                        <div class="form-group">
+                            <label>Store Name: <span style="color: red;">*</span></label>
+                            <input type="text" id="store-name" placeholder="Enter your store name" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Contact Number 1: <span style="color: red;">*</span></label>
+                            <input type="tel" id="contact-number-1" placeholder="Enter primary contact number" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Contact Number 2:</label>
+                            <input type="tel" id="contact-number-2" placeholder="Enter secondary contact number (optional)">
+                        </div>
+                        <div class="form-group">
+                            <label>Email ID:</label>
+                            <input type="email" id="store-email" placeholder="Enter your store email (optional)">
+                            <small style="color: #666; display: block; margin-top: 5px;">Store contact email address</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Address: <span style="color: red;">*</span></label>
+                            <textarea id="address" rows="3" placeholder="Enter your store address" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>GSTIN:</label>
+                            <input type="text" id="gstin" placeholder="Enter GSTIN (optional)" maxlength="15">
+                            <small style="color: #666; display: block; margin-top: 5px;">15-character GST identification number</small>
+                        </div>
+                        <div class="form-group" style="display: none;">
+                            <label>UPI ID:</label>
+                            <input type="text" id="upi-id" placeholder="yourname@upi" value="">
+                            <small style="color: #666; display: block; margin-top: 5px;">Enter your UPI ID (e.g., yourname@paytm, yourname@phonepe, yourname@ybl) - Currently disabled</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Payment Instructions (Optional):</label>
+                            <textarea id="payment-instructions" rows="4" placeholder="Add any additional payment instructions for customers..."></textarea>
+                        </div>
+                        <button type="submit" class="submit-btn">Save Store Details</button>
+                    </form>
+                    <div id="payment-status" style="margin-top: 15px;"></div>
+                    
+                    <!-- Go Live Section -->
+                    <div class="go-live-section" style="margin-top: 40px; padding-top: 30px; border-top: 2px solid #e0e0e0;">
+                        <h3>🚀 Store Status</h3>
+                        <p style="margin-bottom: 20px; color: #666;">Control whether your store is live and accepting orders, or under maintenance.</p>
+                        
+                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+                            <label style="font-weight: 600; color: #333;">Store Status:</label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="store-live-toggle" onchange="toggleStoreStatus()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="store-status-text" style="font-weight: 600; color: #666;">Under Maintenance</span>
+                        </div>
+
+                        <div id="public-link-container" class="public-link-container">
+                            <label>Your Public Store Link:</label>
+                            <div class="public-link-wrapper">
+                                <input type="text" id="public-link" class="public-link-input" readonly>
+                                <button onclick="copyPublicLink()" class="copy-link-btn">Copy Link</button>
+                            </div>
+                            <div id="copy-status" class="copy-status"></div>
+                            <p class="go-live-tip">
+                                <strong>💡 Tip:</strong> Share this link with your customers via WhatsApp, email, or social media. When the toggle is ON, customers can place orders. When OFF, they'll see a maintenance message.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Add Product Modal -->
+    <div id="add-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeAddModal()">&times;</span>
+            <h2>Add New Product</h2>
+            <form id="add-form" onsubmit="addProduct(event)">
+                <div class="form-group">
+                    <label>Name: <span style="color: red;">*</span></label>
+                    <input type="text" id="add-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Price: <span style="color: red;">*</span></label>
+                    <input type="number" id="add-price" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Quantity: <span style="color: red;">*</span></label>
+                    <input type="number" id="add-quantity" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Category:</label>
+                    <input type="text" id="add-category" placeholder="Uncategorized">
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="add-description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Image URL:</label>
+                    <input type="url" id="add-image" placeholder="https://example.com/image.jpg">
+                </div>
+                <button type="submit" class="submit-btn">Add Product</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Product Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeEditModal()">&times;</span>
+            <h2>Edit Product</h2>
+            <form id="edit-form" onsubmit="saveProduct(event)">
+                <input type="hidden" id="edit-id">
+                <div class="form-group">
+                    <label>Name:</label>
+                    <input type="text" id="edit-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Price:</label>
+                    <input type="number" id="edit-price" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>Unit:</label>
+                    <input type="text" id="edit-unit" placeholder="e.g., kg, gram, piece">
+                </div>
+                <div class="form-group">
+                    <label>Stock:</label>
+                    <input type="number" id="edit-quantity" required>
+                </div>
+                <div class="form-group">
+                    <label>Category:</label>
+                    <input type="text" id="edit-category">
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="edit-description"></textarea>
+                </div>
+                <button type="submit" class="submit-btn">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- About Us Modal -->
+    <div id="about-us-modal" class="modal" onclick="closeAboutUsOnBackdrop(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <span class="close" onclick="closeAboutUs()">&times;</span>
+            <h2 style="color: #667eea; margin-bottom: 20px;">About Martify</h2>
+            <div style="line-height: 1.8; color: #555;">
+                <p style="margin-bottom: 15px;">
+                    <strong>Martify</strong> is a comprehensive online store management platform designed to help store owners 
+                    easily manage their inventory, process orders, and provide a seamless shopping experience for their customers.
+                </p>
+                <p style="margin-bottom: 15px;">
+                    With Martify, you can:
+                </p>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>Upload and manage your inventory using Excel or CSV files</li>
+                    <li>Track and process customer orders efficiently</li>
+                    <li>Customize your store details and settings</li>
+                    <li>Control your store's live status with a simple toggle</li>
+                    <li>Provide a modern, user-friendly shopping experience for your customers</li>
+                </ul>
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 25px;">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Contact Information</h3>
+                    <p style="margin: 8px 0;"><strong>Name:</strong> Shiva</p>
+                    <p style="margin: 8px 0;"><strong>Phone:</strong> <a href="tel:7010698749" style="color: #667eea; text-decoration: none;">7010698749</a></p>
+                    <p style="margin: 8px 0;"><strong>Email:</strong> <a href="mailto:shiva.jan29@hotmail.com" style="color: #667eea; text-decoration: none;">shiva.jan29@hotmail.com</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,537 @@
+let products = [];
+let cart = [];
+let filteredProducts = [];
+let paymentSettings = null;
+
+const API_BASE = window.location.origin + '/api';
+
+// Get store slug from URL
+function getStoreSlug() {
+    const path = window.location.pathname;
+    const segments = path.split('/').filter(s => s);
+    // If path is like /store-name, get the last segment
+    // If path is / or /guest, return 'guest'
+    if (segments.length === 0 || segments[0] === 'guest' || segments[0] === 'index.html') {
+        return 'guest';
+    }
+    return segments[segments.length - 1];
+}
+
+// Load products on page load
+document.addEventListener('DOMContentLoaded', () => {
+    const storeSlug = getStoreSlug();
+    loadProducts(storeSlug);
+    loadCart();
+    loadStoreDetails(storeSlug);
+});
+
+async function loadProducts(storeSlug = 'guest') {
+    try {
+        const response = await fetch(`${API_BASE}/store/${storeSlug}/products`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || `Server error: ${response.status}`);
+        }
+        
+        // Ensure products is an array
+        if (!Array.isArray(data)) {
+            throw new Error('Invalid response format: expected array');
+        }
+        
+        products = data;
+        // Debug: log first product to check for unit field
+        if (products.length > 0) {
+            console.log('Sample product:', products[0]);
+        }
+        filteredProducts = products;
+        displayProducts();
+        updateCategoryFilter();
+        // Update cart UI after products are loaded
+        updateCartUI();
+    } catch (error) {
+        console.error('Error loading products:', error);
+        const errorMessage = error.message || 'Unknown error';
+        document.getElementById('products-grid').innerHTML = 
+            `<p class="loading" style="color: red;">Error loading products: ${errorMessage}</p>`;
+    }
+}
+
+function displayProducts() {
+    const grid = document.getElementById('products-grid');
+    
+    if (filteredProducts.length === 0) {
+        grid.innerHTML = '<p class="loading">No products found.</p>';
+        return;
+    }
+
+    grid.innerHTML = filteredProducts.map(product => {
+        const cartItem = cart.find(item => item.productId === product.id);
+        const quantityInCart = cartItem ? cartItem.quantity : 0;
+        const isOutOfStock = product.quantity === 0;
+        
+        // Ensure price is a number before calling toFixed
+        const price = typeof product.price === 'number' ? product.price : parseFloat(product.price) || 0;
+        
+        return `
+        <div class="product-card">
+            ${product.image ? `<img src="${product.image}" alt="${product.name}" onerror="this.style.display='none'">` : ''}
+            <h3>${product.name}</h3>
+            <div class="category">${product.category || 'Uncategorized'}</div>
+            <div class="price">₹${price.toFixed(2)}${product.unit ? ` <span style="color: #667eea; font-weight: 500;">/ ${product.unit}</span>` : ''}</div>
+            ${product.description ? `<p style="font-size: 0.9em; color: #666; margin: 10px 0;">${product.description}</p>` : ''}
+            ${isOutOfStock ? 
+                '<button disabled style="width: 100%; padding: 12px; background: #ccc; color: white; border: none; border-radius: 5px; cursor: not-allowed;">Out of Stock</button>' :
+                `<div class="quantity-controls">
+                    <button class="qty-btn minus-btn" onclick="updateProductQuantity('${product.id}', -1)" ${quantityInCart === 0 ? 'disabled' : ''}>-</button>
+                    <span class="qty-display">${quantityInCart}</span>
+                    <button class="qty-btn plus-btn" onclick="updateProductQuantity('${product.id}', 1)" ${product.quantity === quantityInCart ? 'disabled' : ''}>+</button>
+                </div>`
+            }
+        </div>
+        `;
+    }).join('');
+}
+
+function updateCategoryFilter() {
+    const categories = [...new Set(products.map(p => p.category || 'Uncategorized'))];
+    const filter = document.getElementById('category-filter');
+    const currentValue = filter.value;
+    
+    filter.innerHTML = '<option value="">All Categories</option>' + 
+        categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+    
+    if (currentValue) {
+        filter.value = currentValue;
+    }
+}
+
+function filterProducts() {
+    const category = document.getElementById('category-filter').value;
+    const search = document.getElementById('search-box').value.toLowerCase();
+    
+    filteredProducts = products.filter(product => {
+        const matchesCategory = !category || product.category === category || 
+            (!product.category && category === 'Uncategorized');
+        const matchesSearch = !search || 
+            product.name.toLowerCase().includes(search) ||
+            (product.description && product.description.toLowerCase().includes(search));
+        return matchesCategory && matchesSearch;
+    });
+    
+    displayProducts();
+}
+
+function updateProductQuantity(productId, change) {
+    const product = products.find(p => p.id === productId);
+    if (!product || product.quantity === 0) return;
+    
+    const existingItem = cart.find(item => item.productId === productId);
+    const currentQuantity = existingItem ? (typeof existingItem.quantity === 'number' ? existingItem.quantity : parseInt(existingItem.quantity) || 0) : 0;
+    const newQuantity = currentQuantity + change;
+    
+    if (newQuantity < 0) {
+        return; // Can't go below 0
+    }
+    
+    if (newQuantity === 0) {
+        // Remove from cart if quantity becomes 0
+        removeFromCart(productId);
+    } else if (newQuantity > product.quantity) {
+        alert('Not enough stock available!');
+        return;
+    } else {
+        // Ensure price is a number
+        const productPrice = typeof product.price === 'number' ? product.price : parseFloat(product.price) || 0;
+        
+        // Update or add to cart
+        if (existingItem) {
+            existingItem.quantity = newQuantity;
+            // Update price in case it changed
+            existingItem.price = productPrice;
+            existingItem.name = product.name;
+            existingItem.unit = product.unit || '';
+        } else {
+            cart.push({
+                productId: productId,
+                quantity: newQuantity,
+                name: product.name || 'Unknown Product',
+                price: productPrice,
+                unit: product.unit || ''
+            });
+        }
+        saveCart();
+        updateCartUI();
+    }
+    
+    // Refresh product display to update button states
+    displayProducts();
+}
+
+function removeFromCart(productId) {
+    cart = cart.filter(item => item.productId !== productId);
+    saveCart();
+    updateCartUI();
+    // Refresh product display to update button states
+    displayProducts();
+}
+
+function updateCartQuantity(productId, change) {
+    const item = cart.find(item => item.productId === productId);
+    if (!item) return;
+    
+    const product = products.find(p => p.id === productId);
+    const newQuantity = item.quantity + change;
+    
+    if (newQuantity <= 0) {
+        removeFromCart(productId);
+    } else if (newQuantity > product.quantity) {
+        alert('Not enough stock available!');
+    } else {
+        item.quantity = newQuantity;
+        saveCart();
+        updateCartUI();
+        // Refresh product display to update button states
+        displayProducts();
+    }
+}
+
+function saveCart() {
+    try {
+        localStorage.setItem('cart', JSON.stringify(cart));
+        updateCartCount();
+    } catch (error) {
+        console.error('Error saving cart to localStorage:', error);
+    }
+}
+
+function loadCart() {
+    try {
+        const saved = localStorage.getItem('cart');
+        if (saved) {
+            cart = JSON.parse(saved);
+            // Ensure cart is an array
+            if (!Array.isArray(cart)) {
+                cart = [];
+            }
+            // Validate and clean cart items
+            cart = cart.filter(item => {
+                return item && item.productId && item.quantity > 0;
+            });
+            // Update cart count immediately, UI will update after products load
+            updateCartCount();
+        }
+    } catch (error) {
+        console.error('Error loading cart from localStorage:', error);
+        cart = [];
+    }
+}
+
+function updateCartCount() {
+    const count = cart.reduce((sum, item) => sum + item.quantity, 0);
+    document.getElementById('cart-count').textContent = count;
+}
+
+function updateCartUI() {
+    const cartItems = document.getElementById('cart-items');
+    const cartTotal = document.getElementById('cart-total');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    
+    if (!cartItems) {
+        console.error('Cart items element not found');
+        return;
+    }
+    
+    if (cart.length === 0) {
+        cartItems.innerHTML = '<p class="empty-cart">Your cart is empty</p>';
+        if (checkoutBtn) checkoutBtn.disabled = true;
+        if (cartTotal) cartTotal.textContent = '0.00';
+    } else {
+        cartItems.innerHTML = cart.map(item => {
+            // Ensure price is a number
+            const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
+            const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
+            
+            // Try to get unit from products array, fallback to item.unit
+            const product = products.find(p => p.id === item.productId);
+            const unit = product ? (product.unit || '') : (item.unit || '');
+            const itemName = item.name || (product ? product.name : 'Unknown Product');
+            
+            const itemTotal = price * quantity;
+            
+            return `
+                <div class="cart-item">
+                    <div class="cart-item-info">
+                        <h4>${itemName}</h4>
+                        <p>₹${price.toFixed(2)}${unit ? ` / ${unit}` : ''} × ${quantity}${unit ? ` ${unit}` : ''}</p>
+                    </div>
+                    <div class="cart-item-controls">
+                        <button onclick="updateCartQuantity('${item.productId}', -1)">-</button>
+                        <span>${quantity}</span>
+                        <button onclick="updateCartQuantity('${item.productId}', 1)">+</button>
+                        <button onclick="removeFromCart('${item.productId}')" style="background: #dc3545; margin-left: 10px;">Remove</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        const total = cart.reduce((sum, item) => {
+            const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
+            const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
+            return sum + (price * quantity);
+        }, 0);
+        
+        if (cartTotal) cartTotal.textContent = total.toFixed(2);
+        if (checkoutBtn) checkoutBtn.disabled = false;
+    }
+    
+    updateCartCount();
+}
+
+function toggleCart() {
+    const sidebar = document.getElementById('cart-sidebar');
+    sidebar.classList.toggle('open');
+}
+
+function updateStoreHeader() {
+    const storeNameHeader = document.getElementById('store-name-header');
+    if (paymentSettings && paymentSettings.storeName) {
+        storeNameHeader.textContent = `🛒 ${paymentSettings.storeName}`;
+    }
+}
+
+function showMaintenanceMessage() {
+    const main = document.querySelector('main');
+    if (!main) return;
+    
+    // Hide the main content
+    const storeHeader = document.querySelector('.store-header');
+    const filters = document.querySelector('.filters');
+    const productsGrid = document.getElementById('products-grid');
+    
+    if (storeHeader) storeHeader.style.display = 'none';
+    if (filters) filters.style.display = 'none';
+    if (productsGrid) productsGrid.style.display = 'none';
+    
+    // Show maintenance message
+    let maintenanceDiv = document.getElementById('maintenance-message');
+    if (!maintenanceDiv) {
+        maintenanceDiv = document.createElement('div');
+        maintenanceDiv.id = 'maintenance-message';
+        maintenanceDiv.className = 'maintenance-message';
+        maintenanceDiv.innerHTML = `
+            <h2>🔧 Under Maintenance</h2>
+            <p>We're currently updating our inventory. Please check back soon!</p>
+            <p style="margin-top: 20px; font-size: 0.9em; color: #999;">Thank you for your patience.</p>
+        `;
+        main.insertBefore(maintenanceDiv, main.firstChild);
+    }
+    maintenanceDiv.style.display = 'block';
+}
+
+function hideMaintenanceMessage() {
+    const maintenanceDiv = document.getElementById('maintenance-message');
+    if (maintenanceDiv) {
+        maintenanceDiv.style.display = 'none';
+    }
+    
+    // Show the main content
+    const storeHeader = document.querySelector('.store-header');
+    const filters = document.querySelector('.filters');
+    const productsGrid = document.getElementById('products-grid');
+    
+    if (storeHeader) storeHeader.style.display = 'flex';
+    if (filters) filters.style.display = 'flex';
+    if (productsGrid) productsGrid.style.display = 'grid';
+}
+
+async function loadStoreDetails(storeSlug = 'guest') {
+    try {
+        const response = await fetch(`${API_BASE}/store/${storeSlug}/details`);
+        if (!response.ok) {
+            // If store not found, show maintenance
+            showMaintenanceMessage();
+            return;
+        }
+        paymentSettings = await response.json();
+        
+        // Check if store is live
+        if (!paymentSettings.isLive) {
+            showMaintenanceMessage();
+            return;
+        }
+        
+        // Store is live, hide maintenance message and show store
+        hideMaintenanceMessage();
+        
+        // Update store name in navigation header
+        updateStoreHeader();
+        
+        // Update payment info in checkout modal
+        // UPI ID is disabled, so hide payment info section
+        const paymentInfo = document.getElementById('payment-info');
+        if (paymentInfo) {
+            paymentInfo.style.display = 'none';
+        }
+        
+        // Show instructions if available
+        if (paymentSettings && paymentSettings.instructions) {
+            const instructionsDisplay = document.getElementById('payment-instructions-display');
+            if (instructionsDisplay) {
+                instructionsDisplay.textContent = paymentSettings.instructions;
+                instructionsDisplay.style.display = 'block';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading store details:', error);
+    }
+}
+
+function checkout() {
+    if (cart.length === 0) return;
+    document.getElementById('checkout-modal').style.display = 'block';
+    // Reload store details in case it was updated
+    const storeSlug = getStoreSlug();
+    loadStoreDetails(storeSlug);
+}
+
+function closeCheckoutModal() {
+    document.getElementById('checkout-modal').style.display = 'none';
+}
+
+async function submitOrder(event) {
+    event.preventDefault();
+    
+    const formData = new FormData(event.target);
+    const customerInfo = {
+        name: formData.get('name'),
+        email: formData.get('email'),
+        phone: formData.get('phone'),
+        address: formData.get('address')
+    };
+    
+    const orderItems = cart.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        productPrice: item.price // Include price for order creation
+    }));
+    
+    // Get store slug for order creation
+    const storeSlug = getStoreSlug();
+    
+    try {
+        const response = await fetch(`${API_BASE}/orders`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                items: orderItems,
+                customerInfo: customerInfo,
+                storeSlug: storeSlug
+            })
+        });
+        
+        if (response.status === 503) {
+            const data = await response.json();
+            alert(data.error || 'Store is currently under maintenance. Please try again later.');
+            return;
+        }
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert('Order placed successfully! Order ID: ' + result.order.id);
+            cart = [];
+            saveCart();
+            updateCartUI();
+            closeCheckoutModal();
+            const storeSlug = getStoreSlug();
+            loadProducts(storeSlug); // Refresh inventory
+        } else {
+            const error = await response.json();
+            alert('Error: ' + error.error);
+        }
+    } catch (error) {
+        console.error('Error placing order:', error);
+        alert('Error placing order. Please try again.');
+    }
+}
+
+// Contact Us Modal Functions
+function openContactModal() {
+    const modal = document.getElementById('contact-modal');
+    modal.style.display = 'block';
+    displayContactDetails();
+}
+
+function closeContactModal() {
+    document.getElementById('contact-modal').style.display = 'none';
+}
+
+function displayContactDetails() {
+    const contactDetails = document.getElementById('contact-details');
+    
+    if (!paymentSettings) {
+        contactDetails.innerHTML = '<p class="loading">Loading contact information...</p>';
+        // Try to load store details if not already loaded
+        loadStoreDetails().then(() => {
+            displayContactDetails();
+        });
+        return;
+    }
+    
+    let html = '';
+    
+    if (paymentSettings.storeName) {
+        html += `<h3 style="margin-bottom: 15px; color: #667eea;">${paymentSettings.storeName}</h3>`;
+    }
+    
+    html += '<div style="line-height: 1.8;">';
+    
+    if (paymentSettings.contactNumber1) {
+        html += `<p><strong>📞 Contact Number 1:</strong> <a href="tel:${paymentSettings.contactNumber1}" style="color: #667eea; text-decoration: none;">${paymentSettings.contactNumber1}</a></p>`;
+    }
+    
+    if (paymentSettings.contactNumber2) {
+        html += `<p><strong>📞 Contact Number 2:</strong> <a href="tel:${paymentSettings.contactNumber2}" style="color: #667eea; text-decoration: none;">${paymentSettings.contactNumber2}</a></p>`;
+    }
+    
+    if (paymentSettings.email) {
+        html += `<p><strong>📧 Email:</strong> <a href="mailto:${paymentSettings.email}" style="color: #667eea; text-decoration: none;">${paymentSettings.email}</a></p>`;
+    }
+    
+    if (paymentSettings.address) {
+        html += `<p><strong>📍 Address:</strong><br>${paymentSettings.address.replace(/\n/g, '<br>')}</p>`;
+    }
+    
+    if (paymentSettings.gstin) {
+        html += `<p><strong>🏢 GSTIN:</strong> ${paymentSettings.gstin}</p>`;
+    }
+    
+    // UPI ID is disabled, so don't show it
+    // if (paymentSettings.upiId) {
+    //     html += `<p><strong>💳 UPI ID:</strong> <span style="color: #667eea; font-weight: bold;">${paymentSettings.upiId}</span></p>`;
+    // }
+    
+    html += '</div>';
+    
+    if (!paymentSettings.contactNumber1 && !paymentSettings.address) {
+        html = '<p style="color: #666;">Contact information not available. Please contact the store administrator.</p>';
+    }
+    
+    contactDetails.innerHTML = html;
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const checkoutModal = document.getElementById('checkout-modal');
+    const contactModal = document.getElementById('contact-modal');
+    
+    if (event.target === checkoutModal) {
+        closeCheckoutModal();
+    }
+    if (event.target === contactModal) {
+        closeContactModal();
+    }
+}
+

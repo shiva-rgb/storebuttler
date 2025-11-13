@@ -1,0 +1,818 @@
+const pool = require('../config/db');
+
+// Note: getCurrentStoreName() removed - now using user_id from authentication
+
+// Helper function to convert database row to frontend format
+function transformProduct(row) {
+  if (!row) return null;
+  
+  // Ensure price is always a number (PostgreSQL DECIMAL can return as string)
+  let price = 0;
+  if (row.price !== null && row.price !== undefined) {
+    price = typeof row.price === 'string' ? parseFloat(row.price) : Number(row.price);
+    if (isNaN(price)) price = 0;
+  }
+  
+  // Ensure quantity is always a number
+  let quantity = 0;
+  if (row.quantity !== null && row.quantity !== undefined) {
+    quantity = typeof row.quantity === 'string' ? parseInt(row.quantity) : Number(row.quantity);
+    if (isNaN(quantity)) quantity = 0;
+  }
+  
+  return {
+    id: row.id,
+    name: row.name || '',
+    price: price,
+    quantity: quantity,
+    unit: row.unit || '',
+    category: row.category || 'Uncategorized',
+    description: row.description || '',
+    image: row.image || '',
+    createdAt: row.created_at ? row.created_at.toISOString() : (row.createdAt || new Date().toISOString())
+  };
+}
+
+// ==================== PRODUCT QUERIES ====================
+
+/**
+ * Get all products (filtered by user_id)
+ */
+async function getAllProducts(userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    const result = await pool.query(
+      'SELECT * FROM products WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
+    );
+    return result.rows.map(transformProduct);
+  } catch (error) {
+    console.error('Error getting all products:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get product by ID (filtered by user_id)
+ */
+async function getProductById(id, userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    const result = await pool.query(
+      'SELECT * FROM products WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+    return transformProduct(result.rows[0]) || null;
+  } catch (error) {
+    console.error('Error getting product by ID:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new product (linked to user_id)
+ */
+async function createProduct(product, userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    const {
+      id,
+      name,
+      price,
+      quantity,
+      unit = '',
+      category = 'Uncategorized',
+      description = '',
+      image = '',
+      createdAt = new Date().toISOString()
+    } = product;
+
+    const result = await pool.query(
+      `INSERT INTO products (id, name, price, quantity, unit, category, description, image, created_at, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [id, name, price, quantity, unit, category, description, image, createdAt, userId]
+    );
+    return transformProduct(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating product:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update a product (filtered by user_id)
+ */
+async function updateProduct(id, updates, userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    // Map camelCase to snake_case for database columns
+    const fieldMap = {
+      'name': 'name',
+      'price': 'price',
+      'quantity': 'quantity',
+      'unit': 'unit',
+      'category': 'category',
+      'description': 'description',
+      'image': 'image',
+      'createdAt': 'created_at'
+    };
+
+    // Build dynamic update query
+    Object.keys(updates).forEach(key => {
+      if (updates[key] !== undefined && fieldMap[key]) {
+        const dbField = fieldMap[key];
+        fields.push(`${dbField} = $${paramCount}`);
+        values.push(updates[key]);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) {
+      return await getProductById(id, userId);
+    }
+
+    values.push(id, userId);
+    const query = `UPDATE products SET ${fields.join(', ')} WHERE id = $${paramCount} AND user_id = $${paramCount + 1} RETURNING *`;
+    
+    const result = await pool.query(query, values);
+    return transformProduct(result.rows[0]) || null;
+  } catch (error) {
+    console.error('Error updating product:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a product (filtered by user_id)
+ */
+async function deleteProduct(id, userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    const result = await pool.query(
+      'DELETE FROM products WHERE id = $1 AND user_id = $2 RETURNING *',
+      [id, userId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    throw error;
+  }
+}
+
+/**
+ * Bulk insert products (for Excel/CSV upload, linked to user_id)
+ */
+async function bulkInsertProducts(products, userId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    // Insert products one by one (could be optimized with COPY for large datasets)
+    const insertedProducts = [];
+    for (const product of products) {
+      const {
+        id,
+        name,
+        price,
+        quantity,
+        unit = '',
+        category = 'Uncategorized',
+        description = '',
+        image = '',
+        createdAt = new Date().toISOString()
+      } = product;
+
+      const result = await client.query(
+        `INSERT INTO products (id, name, price, quantity, unit, category, description, image, created_at, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name,
+           price = EXCLUDED.price,
+           quantity = EXCLUDED.quantity,
+           unit = EXCLUDED.unit,
+           category = EXCLUDED.category,
+           description = EXCLUDED.description,
+           image = EXCLUDED.image,
+           user_id = EXCLUDED.user_id
+         RETURNING *`,
+        [id, name, price, quantity, unit, category, description, image, createdAt, userId]
+      );
+      insertedProducts.push(transformProduct(result.rows[0]));
+    }
+    
+    await client.query('COMMIT');
+    return insertedProducts;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error bulk inserting products:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ==================== ORDER QUERIES ====================
+
+/**
+ * Get all orders with their items (filtered by user_id)
+ */
+async function getAllOrders(userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    // Get all orders for current user
+    const ordersResult = await pool.query(
+      'SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
+    );
+    const orders = ordersResult.rows;
+
+    // Get all order items
+    const itemsResult = await pool.query('SELECT * FROM order_items ORDER BY id');
+    const itemsByOrderId = {};
+    
+    itemsResult.rows.forEach(item => {
+      if (!itemsByOrderId[item.order_id]) {
+        itemsByOrderId[item.order_id] = [];
+      }
+      itemsByOrderId[item.order_id].push({
+        productId: item.product_id,
+        quantity: item.quantity,
+        productName: item.product_name,
+        productPrice: parseFloat(item.product_price)
+      });
+    });
+
+    // Combine orders with their items
+    return orders.map(order => ({
+      id: order.id,
+      items: itemsByOrderId[order.id] || [],
+      customerInfo: {
+        name: order.customer_name,
+        email: order.customer_email,
+        phone: order.customer_phone,
+        address: order.customer_address
+      },
+      status: order.status,
+      createdAt: order.created_at.toISOString(),
+      total: parseFloat(order.total)
+    }));
+  } catch (error) {
+    console.error('Error getting all orders:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new order with items (transaction, linked to user_id)
+ * Note: For customer orders, we need to find the user_id from the products
+ */
+async function createOrder(orderData, userId = null) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id, items, customerInfo, status = 'pending', total, createdAt = new Date().toISOString() } = orderData;
+
+    // If userId not provided, get it from the first product
+    let orderUserId = userId;
+    if (!orderUserId && items.length > 0) {
+      const firstProduct = await client.query('SELECT user_id FROM products WHERE id = $1', [items[0].productId]);
+      if (firstProduct.rows.length === 0) {
+        throw new Error(`Product ${items[0].productId} not found`);
+      }
+      orderUserId = firstProduct.rows[0].user_id;
+    }
+
+    if (!orderUserId) {
+      throw new Error('Unable to determine store owner for this order');
+    }
+
+    // Validate and update inventory quantities (only for products from this user's store)
+    for (const item of items) {
+      const product = await client.query('SELECT * FROM products WHERE id = $1 AND user_id = $2', [item.productId, orderUserId]);
+      if (product.rows.length === 0) {
+        throw new Error(`Product ${item.productId} not found for this store`);
+      }
+      if (product.rows[0].quantity < item.quantity) {
+        throw new Error(`Insufficient stock for ${product.rows[0].name}`);
+      }
+      // Update inventory
+      await client.query(
+        'UPDATE products SET quantity = quantity - $1 WHERE id = $2 AND user_id = $3',
+        [item.quantity, item.productId, orderUserId]
+      );
+    }
+
+    // Insert order
+    await client.query(
+      `INSERT INTO orders (id, customer_name, customer_email, customer_phone, customer_address, status, total, created_at, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        id,
+        customerInfo.name,
+        customerInfo.email,
+        customerInfo.phone,
+        customerInfo.address,
+        status,
+        total,
+        createdAt,
+        orderUserId
+      ]
+    );
+
+    // Get product details for order items (only from this user's store)
+    const productDetails = {};
+    for (const item of items) {
+      const product = await client.query('SELECT name, price FROM products WHERE id = $1 AND user_id = $2', [item.productId, orderUserId]);
+      if (product.rows.length > 0) {
+        productDetails[item.productId] = {
+          name: product.rows[0].name,
+          price: product.rows[0].price
+        };
+      }
+    }
+
+    // Insert order items
+    for (const item of items) {
+      const productInfo = productDetails[item.productId] || { name: 'Unknown Product', price: 0 };
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, product_name, product_price)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, item.productId, item.quantity, productInfo.name, productInfo.price]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    // Return the created order
+    const orderResult = await client.query('SELECT * FROM orders WHERE id = $1', [id]);
+    const itemsResult = await client.query(
+      'SELECT * FROM order_items WHERE order_id = $1',
+      [id]
+    );
+
+    return {
+      id: orderResult.rows[0].id,
+      items: itemsResult.rows.map(item => ({
+        productId: item.product_id,
+        quantity: item.quantity,
+        productName: item.product_name,
+        productPrice: parseFloat(item.product_price)
+      })),
+      customerInfo: {
+        name: orderResult.rows[0].customer_name,
+        email: orderResult.rows[0].customer_email,
+        phone: orderResult.rows[0].customer_phone,
+        address: orderResult.rows[0].customer_address
+      },
+      status: orderResult.rows[0].status,
+      createdAt: orderResult.rows[0].created_at.toISOString(),
+      total: parseFloat(orderResult.rows[0].total)
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating order:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Update order status (filtered by current store)
+ */
+async function updateOrderStatus(id, updates) {
+  try {
+    const storeName = await getCurrentStoreName();
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    Object.keys(updates).forEach(key => {
+      if (updates[key] !== undefined) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(updates[key]);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) {
+      return await getAllOrders().then(orders => orders.find(o => o.id === id));
+    }
+
+    values.push(id);
+    let query = `UPDATE orders SET ${fields.join(', ')} WHERE id = $${paramCount}`;
+    
+    if (storeName) {
+      paramCount++;
+      query += ` AND store_name = $${paramCount}`;
+      values.push(storeName);
+    }
+    
+    query += ' RETURNING *';
+    
+    const result = await pool.query(query, values);
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    // Get order items
+    const itemsResult = await pool.query('SELECT * FROM order_items WHERE order_id = $1', [id]);
+    
+    return {
+      id: result.rows[0].id,
+      items: itemsResult.rows.map(item => ({
+        productId: item.product_id,
+        quantity: item.quantity,
+        productName: item.product_name,
+        productPrice: parseFloat(item.product_price)
+      })),
+      customerInfo: {
+        name: result.rows[0].customer_name,
+        email: result.rows[0].customer_email,
+        phone: result.rows[0].customer_phone,
+        address: result.rows[0].customer_address
+      },
+      status: result.rows[0].status,
+      createdAt: result.rows[0].created_at.toISOString(),
+      total: parseFloat(result.rows[0].total)
+    };
+  } catch (error) {
+    console.error('Error updating order:', error);
+    throw error;
+  }
+}
+
+// ==================== STORE DETAILS QUERIES ====================
+
+/**
+ * Get store details by store name slug (for public access)
+ */
+async function getStoreDetailsBySlug(storeSlug) {
+  try {
+    // Find store by matching slugified store_name
+    // Create a slug from store_name and compare
+    const result = await pool.query(
+      `SELECT * FROM store_details 
+       WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(store_name, ' ', '-'), '_', '-'), '.', ''), '/', '-')) = $1 
+       OR LOWER(store_name) LIKE $2
+       ORDER BY id LIMIT 1`,
+      [storeSlug.toLowerCase(), `%${storeSlug.toLowerCase()}%`]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting store details by slug:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get products by user_id (public endpoint for customers)
+ */
+async function getProductsByUserId(userId) {
+  try {
+    if (!userId) {
+      return [];
+    }
+    
+    const result = await pool.query(
+      'SELECT * FROM products WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
+    );
+    return result.rows.map(transformProduct);
+  } catch (error) {
+    console.error('Error getting products by user ID:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get store details (filtered by user_id)
+ */
+async function getStoreDetails(userId) {
+  try {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    const result = await pool.query(
+      'SELECT * FROM store_details WHERE user_id = $1 ORDER BY id LIMIT 1',
+      [userId]
+    );
+    if (result.rows.length === 0) {
+      return {
+        storeName: '',
+        contactNumber1: '',
+        contactNumber2: '',
+        email: '',
+        address: '',
+        gstin: '',
+        upiId: '',
+        instructions: '',
+        isLive: false,
+        updatedAt: null
+      };
+    }
+    
+    const row = result.rows[0];
+    return {
+      storeName: row.store_name || '',
+      contactNumber1: row.contact_number_1 || '',
+      contactNumber2: row.contact_number_2 || '',
+      email: row.email || '',
+      address: row.address || '',
+      gstin: row.gstin || '',
+      upiId: row.upi_id || '',
+      instructions: row.instructions || '',
+      updatedAt: row.updated_at ? row.updated_at.toISOString() : null
+    };
+  } catch (error) {
+    console.error('Error getting store details:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update store details (UPSERT - insert or update, filtered by user_id)
+ */
+async function updateStoreDetails(details, userId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
+    const {
+      storeName,
+      contactNumber1,
+      contactNumber2 = '',
+      email = '',
+      address,
+      gstin = '',
+      upiId,
+      instructions = '',
+      isLive = false,
+      updatedAt = new Date().toISOString()
+    } = details;
+
+    // Check if store details already exist for this user
+    const existing = await client.query(
+      'SELECT id FROM store_details WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    
+    let result;
+    if (existing.rows.length === 0) {
+      // Insert new record
+      result = await client.query(
+        `INSERT INTO store_details (store_name, contact_number_1, contact_number_2, email, address, gstin, upi_id, instructions, updated_at, user_id, is_live)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING *`,
+        [storeName, contactNumber1, contactNumber2, email, address, gstin, upiId || '', instructions, updatedAt, userId, isLive]
+      );
+    } else {
+      // Update existing record
+      result = await client.query(
+        `UPDATE store_details SET
+           store_name = $1,
+           contact_number_1 = $2,
+           contact_number_2 = $3,
+           email = $4,
+           address = $5,
+           gstin = $6,
+           upi_id = $7,
+           instructions = $8,
+           updated_at = $9,
+           is_live = $10
+         WHERE user_id = $11
+         RETURNING *`,
+        [storeName, contactNumber1, contactNumber2, email, address, gstin, upiId || '', instructions, updatedAt, isLive, userId]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const row = result.rows[0];
+    return {
+      storeName: row.store_name || '',
+      contactNumber1: row.contact_number_1 || '',
+      contactNumber2: row.contact_number_2 || '',
+      email: row.email || '',
+      address: row.address || '',
+      gstin: row.gstin || '',
+      upiId: row.upi_id || '',
+      instructions: row.instructions || '',
+      isLive: row.is_live || false,
+      updatedAt: row.updated_at ? row.updated_at.toISOString() : null
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating store details:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ==================== USER QUERIES ====================
+
+/**
+ * Create a new user
+ */
+async function createUser(email, phone, passwordHash) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO users (email, phone, password_hash)
+       VALUES ($1, $2, $3)
+       RETURNING id, email, phone, is_verified, created_at`,
+      [email, phone, passwordHash]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating user:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get user by email
+ */
+async function getUserByEmail(email) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting user by email:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get user by phone (normalized)
+ */
+async function getUserByPhone(phone) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE phone = $1',
+      [phone]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting user by phone:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get user by ID
+ */
+async function getUserById(id) {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, phone, is_verified, created_at FROM users WHERE id = $1',
+      [id]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting user by ID:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update user password
+ */
+async function updateUserPassword(userId, passwordHash) {
+  try {
+    const result = await pool.query(
+      `UPDATE users 
+       SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING id, email, phone`,
+      [passwordHash, userId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error updating user password:', error);
+    throw error;
+  }
+}
+
+/**
+ * Set password reset token
+ */
+async function setResetToken(userId, token, expiry) {
+  try {
+    const result = await pool.query(
+      `UPDATE users 
+       SET reset_token = $1, reset_token_expiry = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING id`,
+      [token, expiry, userId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error setting reset token:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get user by reset token
+ */
+async function getUserByResetToken(token) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM users 
+       WHERE reset_token = $1 
+       AND reset_token_expiry > CURRENT_TIMESTAMP`,
+      [token]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting user by reset token:', error);
+    throw error;
+  }
+}
+
+/**
+ * Clear reset token after use
+ */
+async function clearResetToken(userId) {
+  try {
+    await pool.query(
+      `UPDATE users 
+       SET reset_token = NULL, reset_token_expiry = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [userId]
+    );
+    return true;
+  } catch (error) {
+    console.error('Error clearing reset token:', error);
+    throw error;
+  }
+}
+
+module.exports = {
+  // Product functions
+  getAllProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  bulkInsertProducts,
+  
+  // Order functions
+  getAllOrders,
+  createOrder,
+  updateOrderStatus,
+  
+  // Store details functions
+  getStoreDetails,
+  getStoreDetailsBySlug,
+  updateStoreDetails,
+  getProductsByUserId,
+  
+  // User functions
+  createUser,
+  getUserByEmail,
+  getUserByPhone,
+  getUserById,
+  updateUserPassword,
+  setResetToken,
+  getUserByResetToken,
+  clearResetToken
+};
+

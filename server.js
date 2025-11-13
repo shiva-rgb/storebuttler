@@ -604,7 +604,8 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       upiId, 
       instructions, 
       address, 
-      gstin 
+      gstin,
+      isLive
     } = req.body;
     console.log('Received store details data:', { 
       storeName, 
@@ -614,7 +615,8 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       upiId, 
       instructions, 
       address, 
-      gstin 
+      gstin,
+      isLive
     });
     
     if (!storeName || storeName.trim() === '') {

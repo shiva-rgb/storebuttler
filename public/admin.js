@@ -2,6 +2,8 @@ const API_BASE = window.location.origin + '/api';
 
 let inventory = [];
 let orders = [];
+let customers = [];
+let filteredCustomers = [];
 let sortColumn = null;
 let sortDirection = 'asc';
 let filteredInventory = [];
@@ -23,6 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     loadInventory();
     loadOrders();
+    loadCustomers();
     loadPaymentSettings();
     
     document.getElementById('upload-form').addEventListener('submit', handleUpload);
@@ -1150,4 +1153,79 @@ document.addEventListener('keydown', function(event) {
         }
     }
 });
+
+// Customer Management Functions
+async function loadCustomers() {
+    try {
+        const response = await fetch(`${API_BASE}/admin/customers`, {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            throw new Error(errorData.error || 'Failed to load customers');
+        }
+        
+        customers = await response.json();
+        filteredCustomers = customers;
+        displayCustomers();
+    } catch (error) {
+        console.error('Error loading customers:', error);
+        const tbody = document.getElementById('customers-table-body');
+        if (tbody) {
+            const errorMessage = error.message || 'Error loading customers. Please try again.';
+            tbody.innerHTML = `<tr><td colspan="3" class="loading" style="color: red;">${errorMessage}<br><small style="font-size: 0.8em;">Make sure the database migrations have been run (009_create_customers_table.sql and 010_add_customer_id_to_orders.sql)</small></td></tr>`;
+        }
+    }
+}
+
+function displayCustomers() {
+    const tbody = document.getElementById('customers-table-body');
+    const countSpan = document.getElementById('customers-count');
+    
+    if (!tbody) return;
+    
+    if (filteredCustomers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="loading">No customers found</td></tr>';
+        if (countSpan) countSpan.textContent = '0 customers';
+        return;
+    }
+    
+    tbody.innerHTML = filteredCustomers.map(customer => {
+        const date = new Date(customer.registrationDate);
+        const formattedDate = date.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric'
+        });
+        
+        return `
+            <tr>
+                <td>${customer.name || 'N/A'}</td>
+                <td>${customer.phone || 'N/A'}</td>
+                <td>${formattedDate}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    if (countSpan) {
+        countSpan.textContent = `${filteredCustomers.length} customer${filteredCustomers.length !== 1 ? 's' : ''}`;
+    }
+}
+
+function filterCustomers() {
+    const searchTerm = document.getElementById('search-customers').value.toLowerCase().trim();
+    
+    if (!searchTerm) {
+        filteredCustomers = customers;
+    } else {
+        filteredCustomers = customers.filter(customer => {
+            const name = (customer.name || '').toLowerCase();
+            const phone = (customer.phone || '').toLowerCase();
+            return name.includes(searchTerm) || phone.includes(searchTerm);
+        });
+    }
+    
+    displayCustomers();
+}
 

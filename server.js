@@ -76,6 +76,10 @@ app.use(express.static('public'));
 // Mount authentication routes (before protected routes)
 app.use('/api/auth', authRoutes);
 
+// Mount customer authentication routes
+const customerAuthRoutes = require('./routes/customerAuth');
+app.use('/api/customer-auth', customerAuthRoutes);
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -498,6 +502,18 @@ app.post('/api/orders', async (req, res) => {
       }
     }
 
+    // Check if customer is logged in (optional - guest orders are allowed)
+    let customerId = null;
+    const { authenticateCustomer } = require('./middleware/customerAuth');
+    const customerToken = req.cookies?.customerToken;
+    if (customerToken) {
+      const { verifyToken } = require('./config/auth');
+      const decoded = verifyToken(customerToken);
+      if (decoded && decoded.customerId) {
+        customerId = decoded.customerId;
+      }
+    }
+
     // Calculate total from items (prices should be included from frontend)
     const total = items.reduce((sum, item) => {
       const price = item.productPrice || 0;
@@ -514,7 +530,7 @@ app.post('/api/orders', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    const createdOrder = await createOrder(order);
+    const createdOrder = await createOrder(order, null, customerId);
     res.json({ success: true, order: createdOrder });
   } catch (error) {
     console.error('Error creating order:', error);
@@ -545,6 +561,51 @@ app.put('/api/orders/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error updating order:', error);
     res.status(500).json({ error: 'Error updating order: ' + error.message });
+  }
+});
+
+// Customer API endpoints
+const { authenticateCustomer } = require('./middleware/customerAuth');
+const { getCustomerOrders, getCustomerById } = require('./db/queries');
+
+// Get customer order history (protected)
+app.get('/api/customer/orders', authenticateCustomer, async (req, res) => {
+  try {
+    const orders = await getCustomerOrders(req.customer.id);
+    res.json(orders);
+  } catch (error) {
+    console.error('Error getting customer orders:', error);
+    res.status(500).json({ error: 'Error fetching orders: ' + error.message });
+  }
+});
+
+// Get order details for repeat order (protected)
+app.get('/api/customer/orders/:orderId', authenticateCustomer, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const orders = await getCustomerOrders(req.customer.id);
+    const order = orders.find(o => o.id === orderId);
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    res.json(order);
+  } catch (error) {
+    console.error('Error getting order details:', error);
+    res.status(500).json({ error: 'Error fetching order: ' + error.message });
+  }
+});
+
+// Admin customer list endpoint (protected)
+app.get('/api/admin/customers', authenticateToken, async (req, res) => {
+  try {
+    const { getAllCustomers } = require('./db/queries');
+    const customers = await getAllCustomers();
+    res.json(customers);
+  } catch (error) {
+    console.error('Error getting customers:', error);
+    res.status(500).json({ error: 'Error fetching customers: ' + error.message });
   }
 });
 

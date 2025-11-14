@@ -2,6 +2,7 @@ let products = [];
 let cart = [];
 let filteredProducts = [];
 let paymentSettings = null;
+let currentCustomer = null;
 
 const API_BASE = window.location.origin + '/api';
 
@@ -18,11 +19,42 @@ function getStoreSlug() {
 }
 
 // Load products on page load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Check if user has made a choice (login, signup, or guest)
+    // If not, redirect to login page
+    const hasMadeChoice = localStorage.getItem('customerChoiceMade');
+    
+    // Check if user is logged in by making an API call
+    let isLoggedIn = false;
+    if (!hasMadeChoice) {
+        try {
+            const response = await fetch(`${API_BASE}/customer-auth/me`, {
+                credentials: 'include'
+            });
+            isLoggedIn = response.ok;
+            if (isLoggedIn) {
+                // User is logged in, mark choice as made
+                localStorage.setItem('customerChoiceMade', 'true');
+            }
+        } catch (error) {
+            // Not logged in
+            isLoggedIn = false;
+        }
+    }
+    
+    if (!hasMadeChoice && !isLoggedIn) {
+        // User hasn't made a choice yet, redirect to login page
+        const storeSlug = getStoreSlug();
+        window.location.href = `/customer-login.html?store=${storeSlug}`;
+        return;
+    }
+    
     const storeSlug = getStoreSlug();
     loadProducts(storeSlug);
     loadCart();
     loadStoreDetails(storeSlug);
+    checkCustomerAuth();
+    checkRepeatOrder();
 });
 
 async function loadProducts(storeSlug = 'guest') {
@@ -247,7 +279,14 @@ function updateCartUI() {
         if (checkoutBtn) checkoutBtn.disabled = true;
         if (cartTotal) cartTotal.textContent = '0.00';
     } else {
-        cartItems.innerHTML = cart.map(item => {
+        // Filter out out-of-stock items for display and checkout
+        const availableItems = cart.filter(item => !item.outOfStock);
+        const outOfStockItems = cart.filter(item => item.outOfStock);
+        
+        let cartHtml = '';
+        
+        // Display available items
+        cartHtml += availableItems.map(item => {
             // Ensure price is a number
             const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
             const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
@@ -256,8 +295,6 @@ function updateCartUI() {
             const product = products.find(p => p.id === item.productId);
             const unit = product ? (product.unit || '') : (item.unit || '');
             const itemName = item.name || (product ? product.name : 'Unknown Product');
-            
-            const itemTotal = price * quantity;
             
             return `
                 <div class="cart-item">
@@ -275,14 +312,43 @@ function updateCartUI() {
             `;
         }).join('');
         
-        const total = cart.reduce((sum, item) => {
+        // Display out-of-stock items (no interactive buttons)
+        if (outOfStockItems.length > 0) {
+            cartHtml += outOfStockItems.map(item => {
+                const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
+                const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
+                const product = products.find(p => p.id === item.productId);
+                const unit = product ? (product.unit || '') : (item.unit || '');
+                const itemName = item.name || (product ? product.name : 'Unknown Product');
+                
+                return `
+                    <div class="cart-item" style="opacity: 0.6; background: #f8f8f8;">
+                        <div class="cart-item-info">
+                            <h4>${itemName} <span style="color: #dc3545; font-size: 0.9em;">(Out of Stock)</span></h4>
+                            <p>₹${price.toFixed(2)}${unit ? ` / ${unit}` : ''} × ${quantity}${unit ? ` ${unit}` : ''}</p>
+                        </div>
+                        <div class="cart-item-controls">
+                            <button disabled style="opacity: 0.5; cursor: not-allowed;">-</button>
+                            <span>${quantity}</span>
+                            <button disabled style="opacity: 0.5; cursor: not-allowed;">+</button>
+                            <button onclick="removeFromCart('${item.productId}')" style="background: #dc3545; margin-left: 10px;">Remove</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        cartItems.innerHTML = cartHtml;
+        
+        // Calculate total only from available items (exclude out-of-stock)
+        const total = availableItems.reduce((sum, item) => {
             const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
             const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
             return sum + (price * quantity);
         }, 0);
         
         if (cartTotal) cartTotal.textContent = total.toFixed(2);
-        if (checkoutBtn) checkoutBtn.disabled = false;
+        if (checkoutBtn) checkoutBtn.disabled = availableItems.length === 0;
     }
     
     updateCartCount();
@@ -393,6 +459,17 @@ function checkout() {
     // Reload store details in case it was updated
     const storeSlug = getStoreSlug();
     loadStoreDetails(storeSlug);
+    
+    // Pre-fill customer info if logged in
+    if (currentCustomer) {
+        const form = document.getElementById('checkout-form');
+        if (form) {
+            const nameInput = form.querySelector('input[name="name"]');
+            const phoneInput = form.querySelector('input[name="phone"]');
+            if (nameInput) nameInput.value = currentCustomer.name || '';
+            if (phoneInput) phoneInput.value = currentCustomer.phone || '';
+        }
+    }
 }
 
 function closeCheckoutModal() {
@@ -410,7 +487,15 @@ async function submitOrder(event) {
         address: formData.get('address')
     };
     
-    const orderItems = cart.map(item => ({
+    // Only include available items (exclude out-of-stock items)
+    const availableItems = cart.filter(item => !item.outOfStock);
+    
+    if (availableItems.length === 0) {
+        alert('No available items in cart. Please add items to proceed.');
+        return;
+    }
+    
+    const orderItems = availableItems.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
         productPrice: item.price // Include price for order creation
@@ -441,7 +526,8 @@ async function submitOrder(event) {
         if (response.ok) {
             const result = await response.json();
             alert('Order placed successfully! Order ID: ' + result.order.id);
-            cart = [];
+            // Remove only available items from cart (keep out-of-stock items for reference)
+            cart = cart.filter(item => item.outOfStock);
             saveCart();
             updateCartUI();
             closeCheckoutModal();
@@ -533,5 +619,169 @@ window.onclick = function(event) {
     if (event.target === contactModal) {
         closeContactModal();
     }
+}
+
+// Customer Authentication Functions
+async function checkCustomerAuth() {
+    try {
+        const response = await fetch(`${API_BASE}/customer-auth/me`, {
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            currentCustomer = data.customer;
+            updateCustomerUI();
+        } else {
+            currentCustomer = null;
+            updateCustomerUI();
+        }
+    } catch (error) {
+        console.error('Error checking customer auth:', error);
+        currentCustomer = null;
+        updateCustomerUI();
+    }
+}
+
+function updateCustomerUI() {
+    const loginLink = document.getElementById('login-link');
+    const orderHistoryLink = document.getElementById('order-history-link');
+    const logoutLink = document.getElementById('logout-link');
+    const contactUsLink = document.getElementById('contact-us-link');
+    const welcomeMsg = document.getElementById('store-welcome');
+    
+    if (currentCustomer) {
+        // Customer is logged in - show Order History, Logout and Contact Us
+        if (loginLink) loginLink.style.display = 'none';
+        if (orderHistoryLink) orderHistoryLink.style.display = 'inline';
+        if (logoutLink) logoutLink.style.display = 'inline';
+        if (contactUsLink) contactUsLink.style.display = 'inline';
+        if (welcomeMsg) {
+            welcomeMsg.textContent = `Welcome ${currentCustomer.name}!`;
+        }
+    } else {
+        // Customer is not logged in - show Login and Contact Us
+        if (loginLink) loginLink.style.display = 'inline';
+        if (orderHistoryLink) orderHistoryLink.style.display = 'none';
+        if (logoutLink) logoutLink.style.display = 'none';
+        if (contactUsLink) contactUsLink.style.display = 'inline';
+        if (welcomeMsg) {
+            welcomeMsg.textContent = 'Welcome Guest!!';
+        }
+    }
+}
+
+function goToLogin() {
+    // Clear the choice flag so user can see login page
+    localStorage.removeItem('customerChoiceMade');
+    const storeSlug = getStoreSlug();
+    window.location.href = `/customer-login.html?store=${storeSlug}`;
+}
+
+function goToOrderHistory() {
+    const storeSlug = getStoreSlug();
+    window.location.href = `/order-history.html?store=${storeSlug}`;
+}
+
+async function customerLogout() {
+    try {
+        const response = await fetch(`${API_BASE}/customer-auth/logout`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            currentCustomer = null;
+            // Clear the choice flag so user will see login page again
+            localStorage.removeItem('customerChoiceMade');
+            updateCustomerUI();
+            // Reload page to refresh state
+            window.location.reload();
+        }
+    } catch (error) {
+        console.error('Error logging out:', error);
+        alert('Error logging out. Please try again.');
+    }
+}
+
+// Repeat Order Functionality
+async function checkRepeatOrder() {
+    try {
+        const repeatOrderData = localStorage.getItem('repeatOrder');
+        if (!repeatOrderData) return;
+        
+        const data = JSON.parse(repeatOrderData);
+        
+        // Check if data is recent (within 5 minutes)
+        const age = Date.now() - data.timestamp;
+        if (age > 5 * 60 * 1000) {
+            localStorage.removeItem('repeatOrder');
+            return;
+        }
+        
+        // Wait for products to load
+        if (products.length === 0) {
+            setTimeout(checkRepeatOrder, 500);
+            return;
+        }
+        
+        // Process repeat order
+        await processRepeatOrder(data);
+        
+        // Clear the repeat order data
+        localStorage.removeItem('repeatOrder');
+    } catch (error) {
+        console.error('Error processing repeat order:', error);
+        localStorage.removeItem('repeatOrder');
+    }
+}
+
+async function processRepeatOrder(data) {
+    const { items, unavailableItems } = data;
+    
+    // Add available items to cart
+    items.forEach(item => {
+        const existingItem = cart.find(c => c.productId === item.productId);
+        
+        if (existingItem) {
+            // Item already in cart, update quantity if needed
+            const maxQuantity = Math.min(item.quantity, item.availableQuantity);
+            if (existingItem.quantity < maxQuantity) {
+                existingItem.quantity = maxQuantity;
+            }
+        } else {
+            // Add new item to cart
+            cart.push({
+                productId: item.productId,
+                quantity: item.quantity,
+                name: item.name,
+                price: item.price,
+                unit: item.unit,
+                outOfStock: false
+            });
+        }
+    });
+    
+    // Mark unavailable items in cart (if they exist)
+    unavailableItems.forEach(unavailable => {
+        const cartItem = cart.find(c => c.name === unavailable.name);
+        if (cartItem) {
+            cartItem.outOfStock = true;
+        }
+    });
+    
+    saveCart();
+    updateCartUI();
+    displayProducts();
+    
+    // Show notification
+    let message = `Added ${items.length} item(s) to cart.`;
+    if (unavailableItems.length > 0) {
+        message += `\n\n${unavailableItems.length} item(s) unavailable:\n`;
+        unavailableItems.forEach(item => {
+            message += `• ${item.name} - ${item.reason}\n`;
+        });
+    }
+    alert(message);
 }
 

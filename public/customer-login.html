@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Login - Martify</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .auth-container {
+            max-width: 450px;
+            margin: 50px auto;
+            padding: 35px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15);
+            border: 1px solid rgba(102, 126, 234, 0.1);
+        }
+        .auth-container h2 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 25px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .auth-tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 1em;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .auth-tab.active {
+            color: #667eea;
+            border-bottom: 2px solid #667eea;
+            margin-bottom: -2px;
+        }
+        .auth-form {
+            display: none;
+        }
+        .auth-form.active {
+            display: block;
+        }
+        .auth-form .form-group {
+            margin-bottom: 20px;
+        }
+        .auth-form label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-weight: 500;
+        }
+        .auth-form input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 1em;
+            box-sizing: border-box;
+        }
+        .auth-form input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .auth-form button {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .auth-form button:hover {
+            background: #5568d3;
+        }
+        .guest-button {
+            width: 100%;
+            padding: 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        .guest-button:hover {
+            background: #218838;
+        }
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .error-message.show {
+            display: block;
+        }
+        .success-message {
+            background: #efe;
+            color: #3c3;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .success-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🛒 Martify</h1>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="auth-container">
+            <h2>Welcome to Our Store</h2>
+            <div id="error-message" class="error-message"></div>
+            <div id="success-message" class="success-message"></div>
+            
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="switchTab('signup')">Sign Up</button>
+                <button class="auth-tab" onclick="switchTab('login')">Login</button>
+            </div>
+
+            <!-- Sign Up Form -->
+            <form id="signup-form" class="auth-form active" onsubmit="handleSignup(event)">
+                <div class="form-group">
+                    <label for="signup-name">Name: <span style="color: red;">*</span></label>
+                    <input type="text" id="signup-name" name="name" placeholder="Enter your full name" required 
+                           minlength="2" maxlength="100" 
+                           pattern="[A-Za-z\s]{2,}" 
+                           oninput="validateName(this)">
+                    <small id="signup-name-error" style="color: red; display: none; font-size: 0.85em;"></small>
+                </div>
+                <div class="form-group">
+                    <label for="signup-phone">Phone Number: <span style="color: red;">*</span></label>
+                    <input type="tel" id="signup-phone" name="phone" placeholder="+91XXXXXXXXXX or 10-digit number" required 
+                           pattern="(\+91[0-9]{10}|[0-9]{10})" 
+                           oninput="validatePhone(this)">
+                    <small id="signup-phone-error" style="color: red; display: none; font-size: 0.85em;"></small>
+                </div>
+                <div class="form-group">
+                    <label for="signup-password">Password:</label>
+                    <input type="password" id="signup-password" name="password" placeholder="At least 8 characters with letters and numbers" required>
+                </div>
+                <button type="submit">Create Account</button>
+            </form>
+
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="login-phone">Phone Number: <span style="color: red;">*</span></label>
+                    <input type="tel" id="login-phone" name="phone" placeholder="+91XXXXXXXXXX or 10-digit number" required 
+                           pattern="(\+91[0-9]{10}|[0-9]{10})" 
+                           oninput="validateLoginPhone(this)">
+                    <small id="login-phone-error" style="color: red; display: none; font-size: 0.85em;"></small>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password:</label>
+                    <input type="password" id="login-password" name="password" placeholder="Enter your password" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+
+            <button class="guest-button" onclick="continueAsGuest()">Continue as Guest</button>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = window.location.origin + '/api';
+
+        function switchTab(tab) {
+            // Update tab buttons
+            document.querySelectorAll('.auth-tab').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update forms
+            document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
+            if (tab === 'signup') {
+                document.getElementById('signup-form').classList.add('active');
+            } else {
+                document.getElementById('login-form').classList.add('active');
+            }
+
+            // Clear messages
+            clearMessages();
+        }
+
+        function clearMessages() {
+            document.getElementById('error-message').classList.remove('show');
+            document.getElementById('success-message').classList.remove('show');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+            document.getElementById('success-message').classList.remove('show');
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success-message');
+            successDiv.textContent = message;
+            successDiv.classList.add('show');
+            document.getElementById('error-message').classList.remove('show');
+        }
+
+        async function handleSignup(event) {
+            event.preventDefault();
+            clearMessages();
+            
+            const nameInput = document.getElementById('signup-name');
+            const phoneInput = document.getElementById('signup-phone');
+            
+            // Validate name and phone before submitting
+            const isNameValid = validateName(nameInput);
+            const isPhoneValid = validatePhone(phoneInput);
+            
+            if (!isNameValid || !isPhoneValid) {
+                showError('Please fix the validation errors before submitting.');
+                return;
+            }
+            
+            const name = nameInput.value.trim();
+            const phone = phoneInput.value.trim();
+            const password = document.getElementById('signup-password').value;
+            
+            try {
+                const response = await fetch(`${API_BASE}/customer-auth/signup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ name, phone, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Mark that user has made a choice
+                    localStorage.setItem('customerChoiceMade', 'true');
+                    showSuccess('Account created successfully! Redirecting...');
+                    setTimeout(() => {
+                        // Redirect back to store
+                        const storeSlug = getStoreSlug();
+                        window.location.href = storeSlug === 'guest' ? '/guest' : `/${storeSlug}`;
+                    }, 1500);
+                } else {
+                    showError(data.error || 'Signup failed. Please try again.');
+                }
+            } catch (error) {
+                console.error('Signup error:', error);
+                showError('Network error. Please check your connection and try again.');
+            }
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            clearMessages();
+            
+            const phoneInput = document.getElementById('login-phone');
+            
+            // Validate phone before submitting
+            const isPhoneValid = validateLoginPhone(phoneInput);
+            
+            if (!isPhoneValid) {
+                showError('Please fix the phone number format before submitting.');
+                return;
+            }
+            
+            const phone = phoneInput.value.trim();
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                const response = await fetch(`${API_BASE}/customer-auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ phone, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Mark that user has made a choice
+                    localStorage.setItem('customerChoiceMade', 'true');
+                    showSuccess('Login successful! Redirecting...');
+                    setTimeout(() => {
+                        // Redirect back to store
+                        const storeSlug = getStoreSlug();
+                        window.location.href = storeSlug === 'guest' ? '/guest' : `/${storeSlug}`;
+                    }, 1500);
+                } else {
+                    showError(data.error || 'Login failed. Please try again.');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showError('Network error. Please check your connection and try again.');
+            }
+        }
+
+        function continueAsGuest() {
+            // Mark that user has chosen to continue as guest
+            localStorage.setItem('customerChoiceMade', 'true');
+            // Redirect back to store as guest
+            const storeSlug = getStoreSlug();
+            window.location.href = storeSlug === 'guest' ? '/guest' : `/${storeSlug}`;
+        }
+
+        // Validation functions
+        function validateName(input) {
+            const name = input.value.trim();
+            const errorElement = document.getElementById('signup-name-error');
+            
+            if (name.length < 2) {
+                errorElement.textContent = 'Name must be at least 2 characters long';
+                errorElement.style.display = 'block';
+                input.setCustomValidity('Name must be at least 2 characters long');
+                return false;
+            }
+            
+            if (!/^[A-Za-z\s]+$/.test(name)) {
+                errorElement.textContent = 'Name can only contain letters and spaces';
+                errorElement.style.display = 'block';
+                input.setCustomValidity('Name can only contain letters and spaces');
+                return false;
+            }
+            
+            errorElement.style.display = 'none';
+            input.setCustomValidity('');
+            return true;
+        }
+
+        function validatePhone(input) {
+            const phone = input.value.trim();
+            const errorElement = document.getElementById('signup-phone-error');
+            
+            // Remove all non-digit characters for validation
+            const digits = phone.replace(/\D/g, '');
+            
+            // Check if it's a valid Indian phone number format
+            // Should be either 10 digits (without country code) or 12 digits (with +91)
+            if (phone.startsWith('+91')) {
+                if (digits.length !== 12 || !digits.startsWith('91')) {
+                    errorElement.textContent = 'Invalid phone number format. Use +91 followed by 10 digits';
+                    errorElement.style.display = 'block';
+                    input.setCustomValidity('Invalid phone number format');
+                    return false;
+                }
+            } else if (digits.length === 10) {
+                // 10 digit number without country code - valid
+            } else if (digits.length === 11 && digits.startsWith('0')) {
+                errorElement.textContent = 'Please remove leading 0 or use +91 format';
+                errorElement.style.display = 'block';
+                input.setCustomValidity('Invalid phone number format');
+                return false;
+            } else {
+                errorElement.textContent = 'Phone number must be 10 digits or +91 followed by 10 digits';
+                errorElement.style.display = 'block';
+                input.setCustomValidity('Invalid phone number format');
+                return false;
+            }
+            
+            errorElement.style.display = 'none';
+            input.setCustomValidity('');
+            return true;
+        }
+
+        function validateLoginPhone(input) {
+            const phone = input.value.trim();
+            const errorElement = document.getElementById('login-phone-error');
+            
+            // Remove all non-digit characters for validation
+            const digits = phone.replace(/\D/g, '');
+            
+            // Check if it's a valid Indian phone number format
+            if (phone.startsWith('+91')) {
+                if (digits.length !== 12 || !digits.startsWith('91')) {
+                    errorElement.textContent = 'Invalid phone number format. Use +91 followed by 10 digits';
+                    errorElement.style.display = 'block';
+                    input.setCustomValidity('Invalid phone number format');
+                    return false;
+                }
+            } else if (digits.length === 10) {
+                // 10 digit number without country code - valid
+            } else if (digits.length === 11 && digits.startsWith('0')) {
+                errorElement.textContent = 'Please remove leading 0 or use +91 format';
+                errorElement.style.display = 'block';
+                input.setCustomValidity('Invalid phone number format');
+                return false;
+            } else {
+                errorElement.textContent = 'Phone number must be 10 digits or +91 followed by 10 digits';
+                errorElement.style.display = 'block';
+                input.setCustomValidity('Invalid phone number format');
+                return false;
+            }
+            
+            errorElement.style.display = 'none';
+            input.setCustomValidity('');
+            return true;
+        }
+
+        function getStoreSlug() {
+            // First try to get from URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const store = urlParams.get('store');
+            if (store) return store;
+            
+            // Try to get from referrer
+            const referrer = document.referrer;
+            if (referrer) {
+                try {
+                    const url = new URL(referrer);
+                    const pathSegments = url.pathname.split('/').filter(s => s);
+                    if (pathSegments.length > 0 && pathSegments[0] !== 'customer-login.html' && pathSegments[0] !== 'order-history.html') {
+                        return pathSegments[pathSegments.length - 1];
+                    }
+                } catch (e) {
+                    // Ignore
+                }
+            }
+            return 'guest';
+        }
+
+        // Check if already logged in or has made a choice
+        document.addEventListener('DOMContentLoaded', async () => {
+            const hasMadeChoice = localStorage.getItem('customerChoiceMade');
+            
+            try {
+                const response = await fetch(`${API_BASE}/customer-auth/me`, {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    // Already logged in, mark choice and redirect to store
+                    localStorage.setItem('customerChoiceMade', 'true');
+                    const storeSlug = getStoreSlug();
+                    window.location.href = storeSlug === 'guest' ? '/guest' : `/${storeSlug}`;
+                } else if (hasMadeChoice) {
+                    // User has made a choice before (guest), redirect to store
+                    const storeSlug = getStoreSlug();
+                    window.location.href = storeSlug === 'guest' ? '/guest' : `/${storeSlug}`;
+                }
+                // Otherwise stay on login page
+            } catch (error) {
+                // Not logged in, check if they've made a choice before
+                if (hasMadeChoice) {
+                    const storeSlug = getStoreSlug();
+                    window.location.href = storeSlug === 'guest' ? '/guest' : `/${storeSlug}`;
+                }
+                // Otherwise stay on login page
+            }
+        });
+    </script>
+</body>
+</html>
+

@@ -22,6 +22,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('inventory', this)">Inventory</button>
             <button class="tab-btn" onclick="switchTab('orders', this)">Orders</button>
+            <button class="tab-btn" onclick="switchTab('customers', this)">Customers</button>
             <button class="tab-btn" onclick="switchTab('payment', this)">Store Details</button>
         </div>
 
@@ -171,6 +172,39 @@
                 
                 <div class="orders-container" id="orders-container">
                     <p class="loading">Loading orders...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Customers Tab -->
+        <div id="customers-tab" class="tab-content">
+            <div class="admin-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Customer List</h2>
+                    <button onclick="loadCustomers()" class="refresh-btn">🔄 Refresh</button>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <input type="text" id="search-customers" placeholder="Search by name or phone..." oninput="filterCustomers()" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                </div>
+                
+                <div style="margin-bottom: 15px; color: #666; font-size: 0.9em;">
+                    <span id="customers-count"></span>
+                </div>
+                
+                <div class="inventory-table-container">
+                    <table class="inventory-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone Number</th>
+                                <th>Registration Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customers-table-body">
+                            <tr><td colspan="3" class="loading">Loading customers...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

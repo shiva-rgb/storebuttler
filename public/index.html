@@ -11,8 +11,10 @@
         <div class="container">
             <h1 id="store-name-header">🛒 Martify</h1>
             <nav id="header-nav">
-                <a href="/guest">Guest</a>
-                <a href="#" onclick="openContactModal(); return false;">Contact Us</a>
+                <a href="#" id="login-link" onclick="goToLogin(); return false;" style="display: none;">Login</a>
+                <a href="#" id="order-history-link" onclick="goToOrderHistory(); return false;" style="display: none;">Order History</a>
+                <a href="#" id="logout-link" onclick="customerLogout(); return false;" style="display: none;">Logout</a>
+                <a href="#" onclick="openContactModal(); return false;" id="contact-us-link">Contact Us</a>
             </nav>
         </div>
     </header>

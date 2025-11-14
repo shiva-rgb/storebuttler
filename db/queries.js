@@ -292,8 +292,11 @@ async function getAllOrders(userId) {
 /**
  * Create a new order with items (transaction, linked to user_id)
  * Note: For customer orders, we need to find the user_id from the products
+ * @param {Object} orderData - Order data including items, customerInfo, etc.
+ * @param {number} userId - Store owner user ID (optional, will be derived from products if not provided)
+ * @param {number} customerId - Customer ID if customer is logged in (optional, null for guest orders)
  */
-async function createOrder(orderData, userId = null) {
+async function createOrder(orderData, userId = null, customerId = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -332,8 +335,8 @@ async function createOrder(orderData, userId = null) {
 
     // Insert order
     await client.query(
-      `INSERT INTO orders (id, customer_name, customer_email, customer_phone, customer_address, status, total, created_at, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO orders (id, customer_name, customer_email, customer_phone, customer_address, status, total, created_at, user_id, customer_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         customerInfo.name,
@@ -343,7 +346,8 @@ async function createOrder(orderData, userId = null) {
         status,
         total,
         createdAt,
-        orderUserId
+        orderUserId,
+        customerId // NULL for guest orders, customer ID for logged-in customers
       ]
     );
 
@@ -808,6 +812,138 @@ async function clearResetToken(userId) {
   }
 }
 
+// ==================== CUSTOMER QUERIES ====================
+
+/**
+ * Create a new customer
+ */
+async function createCustomer(name, phone, passwordHash) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO customers (name, phone, password_hash)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, phone, created_at`,
+      [name, phone, passwordHash]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating customer:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get customer by phone
+ */
+async function getCustomerByPhone(phone) {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM customers WHERE phone = $1',
+      [phone]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting customer by phone:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get customer by ID
+ */
+async function getCustomerById(id) {
+  try {
+    const result = await pool.query(
+      'SELECT id, name, phone, created_at FROM customers WHERE id = $1',
+      [id]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting customer by ID:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all orders for a customer
+ */
+async function getCustomerOrders(customerId) {
+  try {
+    if (!customerId) {
+      throw new Error('Customer ID is required');
+    }
+    
+    // Get all orders for this customer
+    const ordersResult = await pool.query(
+      'SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC',
+      [customerId]
+    );
+    const orders = ordersResult.rows;
+
+    // Get all order items
+    const orderIds = orders.map(o => o.id);
+    if (orderIds.length === 0) {
+      return [];
+    }
+
+    const itemsResult = await pool.query(
+      'SELECT * FROM order_items WHERE order_id = ANY($1) ORDER BY id',
+      [orderIds]
+    );
+    const itemsByOrderId = {};
+    
+    itemsResult.rows.forEach(item => {
+      if (!itemsByOrderId[item.order_id]) {
+        itemsByOrderId[item.order_id] = [];
+      }
+      itemsByOrderId[item.order_id].push({
+        productId: item.product_id,
+        quantity: item.quantity,
+        productName: item.product_name,
+        productPrice: parseFloat(item.product_price)
+      });
+    });
+
+    // Combine orders with their items
+    return orders.map(order => ({
+      id: order.id,
+      items: itemsByOrderId[order.id] || [],
+      customerInfo: {
+        name: order.customer_name,
+        email: order.customer_email,
+        phone: order.customer_phone,
+        address: order.customer_address
+      },
+      status: order.status,
+      createdAt: order.created_at.toISOString(),
+      total: parseFloat(order.total)
+    }));
+  } catch (error) {
+    console.error('Error getting customer orders:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all customers (for admin)
+ */
+async function getAllCustomers() {
+  try {
+    const result = await pool.query(
+      'SELECT id, name, phone, created_at FROM customers ORDER BY created_at DESC'
+    );
+    return result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      registrationDate: row.created_at.toISOString()
+    }));
+  } catch (error) {
+    console.error('Error getting all customers:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   // Product functions
   getAllProducts,
@@ -836,6 +972,13 @@ module.exports = {
   updateUserPassword,
   setResetToken,
   getUserByResetToken,
-  clearResetToken
+  clearResetToken,
+  
+  // Customer functions
+  createCustomer,
+  getCustomerByPhone,
+  getCustomerById,
+  getCustomerOrders,
+  getAllCustomers
 };
 

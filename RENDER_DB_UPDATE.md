@@ -14,6 +14,8 @@ If you have the external database URL, use this method:
    cd D:\supermartweb
    
    # Run each migration (replace YOUR_URL with your actual URL)
+   # IMPORTANT: Run 011 first if you get "online_payment_enabled does not exist" error
+   psql "YOUR_EXTERNAL_URL" -f migrations/011_add_online_payment_enabled.sql
    psql "YOUR_EXTERNAL_URL" -f migrations/012_add_payment_fields_to_orders.sql
    psql "YOUR_EXTERNAL_URL" -f migrations/013_add_razorpay_keys_to_store_details.sql
    psql "YOUR_EXTERNAL_URL" -f migrations/014_remove_unused_bank_details_columns.sql
@@ -37,6 +39,12 @@ If you have the external database URL, use this method:
 ## Step 2: Run These SQL Commands
 
 Copy and paste each block one at a time, press Enter after each:
+
+### Migration 0: Add Online Payment Enabled (Run this first if you get "online_payment_enabled does not exist" error)
+```sql
+ALTER TABLE store_details ADD COLUMN IF NOT EXISTS online_payment_enabled BOOLEAN DEFAULT false;
+UPDATE store_details SET online_payment_enabled = false WHERE online_payment_enabled IS NULL;
+```
 
 ### Migration 1: Add Payment Fields to Orders
 ```sql

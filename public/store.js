@@ -399,7 +399,7 @@ function updateStoreHeader() {
     }
 }
 
-function showMaintenanceMessage() {
+function showMaintenanceMessage(paymentSettings = null) {
     const main = document.querySelector('main');
     if (!main) return;
     
@@ -412,19 +412,34 @@ function showMaintenanceMessage() {
     if (filters) filters.style.display = 'none';
     if (productsGrid) productsGrid.style.display = 'none';
     
+    // Determine message based on schedule or maintenance
+    let message = '🔧 Under Maintenance';
+    let description = "We're currently updating our inventory. Please check back soon!";
+    
+    if (paymentSettings && paymentSettings.operatingScheduleEnabled) {
+        message = '⏰ We are not accepting orders right now';
+        description = 'Our store is currently closed. Please visit during our operating hours.';
+        
+        // Try to show next opening time if possible
+        const nextOpening = getNextOpeningTime(paymentSettings);
+        if (nextOpening) {
+            description += ` We will be open ${nextOpening}.`;
+        }
+    }
+    
     // Show maintenance message
     let maintenanceDiv = document.getElementById('maintenance-message');
     if (!maintenanceDiv) {
         maintenanceDiv = document.createElement('div');
         maintenanceDiv.id = 'maintenance-message';
         maintenanceDiv.className = 'maintenance-message';
-        maintenanceDiv.innerHTML = `
-            <h2>🔧 Under Maintenance</h2>
-            <p>We're currently updating our inventory. Please check back soon!</p>
-            <p style="margin-top: 20px; font-size: 0.9em; color: #999;">Thank you for your patience.</p>
-        `;
         main.insertBefore(maintenanceDiv, main.firstChild);
     }
+    maintenanceDiv.innerHTML = `
+        <h2>${message}</h2>
+        <p>${description}</p>
+        <p style="margin-top: 20px; font-size: 0.9em; color: #999;">Thank you for your patience.</p>
+    `;
     maintenanceDiv.style.display = 'block';
 }
 
@@ -457,13 +472,15 @@ async function loadStoreDetails(storeSlug = 'guest') {
         console.log('[STORE] Loaded payment settings:', paymentSettings);
         console.log('[STORE] Minimum order value:', paymentSettings.minimumOrderValue);
         
-        // Check if store is live
-        if (!paymentSettings.isLive) {
-            showMaintenanceMessage();
+        // Check if store is operating (schedule or isLive)
+        const isOperating = checkOperatingSchedule(paymentSettings);
+        
+        if (!isOperating) {
+            showMaintenanceMessage(paymentSettings);
             return;
         }
         
-        // Store is live, hide maintenance message and show store
+        // Store is operating, hide maintenance message and show store
         hideMaintenanceMessage();
         
         // Update store name in navigation header
@@ -498,6 +515,112 @@ async function loadStoreDetails(storeSlug = 'guest') {
     } catch (error) {
         console.error('Error loading store details:', error);
     }
+}
+
+function checkOperatingSchedule(paymentSettings) {
+    // If schedule is not enabled, fall back to isLive
+    if (!paymentSettings.operatingScheduleEnabled) {
+        return paymentSettings.isLive || false;
+    }
+    
+    // If schedule is enabled but days/times are not set, return false
+    if (!paymentSettings.operatingScheduleDays || 
+        !paymentSettings.operatingScheduleStartTime || 
+        !paymentSettings.operatingScheduleEndTime) {
+        return false;
+    }
+    
+    // Get current time in IST (UTC+5:30)
+    const now = new Date();
+    // Convert to IST: UTC + 5:30 hours
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istTime = new Date(now.getTime() + istOffset);
+    
+    // Get current day in IST (0=Sunday, 1=Monday, etc.)
+    // Use UTC methods since we've already adjusted for IST offset
+    const currentDay = istTime.getUTCDay();
+    
+    // Parse operating schedule days
+    let operatingDays = [];
+    if (Array.isArray(paymentSettings.operatingScheduleDays)) {
+        operatingDays = paymentSettings.operatingScheduleDays;
+    } else if (typeof paymentSettings.operatingScheduleDays === 'string') {
+        try {
+            operatingDays = JSON.parse(paymentSettings.operatingScheduleDays);
+        } catch (e) {
+            console.error('Error parsing operating schedule days:', e);
+            return false;
+        }
+    }
+    
+    // Check if today is in operating days
+    if (!operatingDays.includes(currentDay)) {
+        return false;
+    }
+    
+    // Get current time in minutes since midnight (IST)
+    const currentHours = istTime.getUTCHours();
+    const currentMinutes = istTime.getUTCMinutes();
+    const currentTime = currentHours * 60 + currentMinutes;
+    
+    // Parse start and end times (HH:MM format)
+    const [startHour, startMin] = paymentSettings.operatingScheduleStartTime.split(':').map(Number);
+    const [endHour, endMin] = paymentSettings.operatingScheduleEndTime.split(':').map(Number);
+    const startTime = startHour * 60 + startMin;
+    const endTime = endHour * 60 + endMin;
+    
+    // Check if current time is within operating hours
+    return currentTime >= startTime && currentTime < endTime;
+}
+
+function getNextOpeningTime(paymentSettings) {
+    if (!paymentSettings.operatingScheduleDays || 
+        !paymentSettings.operatingScheduleStartTime) {
+        return null;
+    }
+    
+    // Get current time in IST
+    const now = new Date();
+    // Convert to IST: UTC + 5:30 hours
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istTime = new Date(now.getTime() + istOffset);
+    const currentDay = istTime.getUTCDay();
+    
+    // Parse operating days
+    let operatingDays = [];
+    if (Array.isArray(paymentSettings.operatingScheduleDays)) {
+        operatingDays = paymentSettings.operatingScheduleDays;
+    } else if (typeof paymentSettings.operatingScheduleDays === 'string') {
+        try {
+            operatingDays = JSON.parse(paymentSettings.operatingScheduleDays);
+        } catch (e) {
+            return null;
+        }
+    }
+    
+    // Find next operating day
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    for (let i = 0; i < 7; i++) {
+        const checkDay = (currentDay + i) % 7;
+        if (operatingDays.includes(checkDay)) {
+            if (i === 0) {
+                // Today is an operating day, check if we're before opening time
+                const [startHour, startMin] = paymentSettings.operatingScheduleStartTime.split(':').map(Number);
+                const currentHours = istTime.getUTCHours();
+                const currentMinutes = istTime.getUTCMinutes();
+                const currentTime = currentHours * 60 + currentMinutes;
+                const startTime = startHour * 60 + startMin;
+                
+                if (currentTime < startTime) {
+                    return `today at ${paymentSettings.operatingScheduleStartTime}`;
+                }
+            } else {
+                return `on ${dayNames[checkDay]} at ${paymentSettings.operatingScheduleStartTime}`;
+            }
+        }
+    }
+    
+    return null;
 }
 
 async function checkout() {

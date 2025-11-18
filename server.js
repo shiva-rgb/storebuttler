@@ -469,6 +469,20 @@ app.get('/api/store/:storeSlug/details', async (req, res) => {
       return res.status(404).json({ error: 'Store not found' });
     }
     
+    // Parse operating schedule days if it's a JSON string
+    let operatingScheduleDays = null;
+    if (store.operating_schedule_days) {
+      if (typeof store.operating_schedule_days === 'string') {
+        try {
+          operatingScheduleDays = JSON.parse(store.operating_schedule_days);
+        } catch (e) {
+          operatingScheduleDays = store.operating_schedule_days;
+        }
+      } else {
+        operatingScheduleDays = store.operating_schedule_days;
+      }
+    }
+    
     res.json({
       storeName: store.store_name || '',
       contactNumber1: store.contact_number_1 || '',
@@ -479,7 +493,12 @@ app.get('/api/store/:storeSlug/details', async (req, res) => {
       minimumOrderValue: store.minimum_order_value !== null && store.minimum_order_value !== undefined ? parseFloat(store.minimum_order_value) : null,
       isLive: store.is_live || false,
       onlinePaymentEnabled: store.online_payment_enabled === true || store.online_payment_enabled === 'true',
-      razorpayKeyId: store.razorpay_key_id || null
+      razorpayKeyId: store.razorpay_key_id || null,
+      operatingScheduleEnabled: store.operating_schedule_enabled || false,
+      operatingScheduleDays: operatingScheduleDays,
+      operatingScheduleStartTime: store.operating_schedule_start_time || null,
+      operatingScheduleEndTime: store.operating_schedule_end_time || null,
+      operatingScheduleTimezone: store.operating_schedule_timezone || 'Asia/Kolkata'
     });
   } catch (error) {
     console.error('Error getting store details:', error);
@@ -814,7 +833,12 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       instructions, 
       address, 
       isLive,
-      minimumOrderValue
+      minimumOrderValue,
+      operatingScheduleEnabled,
+      operatingScheduleDays,
+      operatingScheduleStartTime,
+      operatingScheduleEndTime,
+      operatingScheduleTimezone
     } = req.body;
     console.log('Received store details data:', { 
       storeName, 
@@ -827,34 +851,59 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       minimumOrderValue
     });
     
-    if (!storeName || storeName.trim() === '') {
-      return res.status(400).json({ error: 'Store Name is required' });
-    }
-    
-    if (!contactNumber1 || contactNumber1.trim() === '') {
-      return res.status(400).json({ error: 'Contact Number 1 is required' });
-    }
-    
-    if (!address || address.trim() === '') {
-      return res.status(400).json({ error: 'Address is required' });
-    }
-    
-    // Get current store details to preserve isLive and onlinePaymentEnabled if not provided
+    // Get current store details to preserve values if not provided
     const { getStoreDetails } = require('./db/queries');
     const currentDetails = await getStoreDetails(req.user.id);
     
+    // Only validate required fields if they are being updated (not just operating schedule)
+    // If only operating schedule fields are provided, skip validation
+    const isOnlyOperatingScheduleUpdate = 
+      operatingScheduleEnabled !== undefined || 
+      operatingScheduleDays !== undefined || 
+      operatingScheduleStartTime !== undefined || 
+      operatingScheduleEndTime !== undefined || 
+      operatingScheduleTimezone !== undefined;
+    
+    const isUpdatingStoreDetails = storeName !== undefined || contactNumber1 !== undefined || address !== undefined;
+    
+    // If updating store details (not just schedule), validate required fields
+    if (isUpdatingStoreDetails) {
+      const finalStoreName = storeName !== undefined ? storeName.trim() : (currentDetails.storeName || '');
+      const finalContactNumber1 = contactNumber1 !== undefined ? contactNumber1.trim() : (currentDetails.contactNumber1 || '');
+      const finalAddress = address !== undefined ? address.trim() : (currentDetails.address || '');
+      
+      if (!finalStoreName || finalStoreName === '') {
+        return res.status(400).json({ error: 'Store Name is required' });
+      }
+      
+      if (!finalContactNumber1 || finalContactNumber1 === '') {
+        return res.status(400).json({ error: 'Contact Number 1 is required' });
+      }
+      
+      if (!finalAddress || finalAddress === '') {
+        return res.status(400).json({ error: 'Address is required' });
+      }
+    }
+    
     const storeDetails = {
-      storeName: storeName.trim(),
-      contactNumber1: contactNumber1.trim(),
-      contactNumber2: (contactNumber2 || '').trim(),
-      email: (email || '').trim(),
-      address: address.trim(),
-      instructions: (instructions || '').trim(),
+      // Only include store details fields if they are being updated
+      storeName: storeName !== undefined ? storeName.trim() : currentDetails.storeName,
+      contactNumber1: contactNumber1 !== undefined ? contactNumber1.trim() : currentDetails.contactNumber1,
+      contactNumber2: contactNumber2 !== undefined ? (contactNumber2 || '').trim() : (currentDetails.contactNumber2 || ''),
+      email: email !== undefined ? (email || '').trim() : (currentDetails.email || ''),
+      address: address !== undefined ? address.trim() : currentDetails.address,
+      instructions: instructions !== undefined ? (instructions || '').trim() : (currentDetails.instructions || ''),
       // Preserve existing isLive if not provided, otherwise use the provided value
       isLive: isLive !== undefined ? (isLive === true || isLive === 'true') : (currentDetails.isLive || false),
       // Preserve existing onlinePaymentEnabled if not provided
       onlinePaymentEnabled: currentDetails.onlinePaymentEnabled || false,
-      minimumOrderValue: minimumOrderValue !== undefined && minimumOrderValue !== null && minimumOrderValue !== '' ? parseFloat(minimumOrderValue) : null,
+      minimumOrderValue: minimumOrderValue !== undefined && minimumOrderValue !== null && minimumOrderValue !== '' ? parseFloat(minimumOrderValue) : (currentDetails.minimumOrderValue || null),
+      // Operating schedule fields
+      operatingScheduleEnabled: operatingScheduleEnabled !== undefined ? (operatingScheduleEnabled === true || operatingScheduleEnabled === 'true') : (currentDetails.operatingScheduleEnabled || false),
+      operatingScheduleDays: operatingScheduleDays !== undefined ? operatingScheduleDays : (currentDetails.operatingScheduleDays || null),
+      operatingScheduleStartTime: operatingScheduleStartTime !== undefined && operatingScheduleStartTime !== null && operatingScheduleStartTime !== '' ? operatingScheduleStartTime : (currentDetails.operatingScheduleStartTime || null),
+      operatingScheduleEndTime: operatingScheduleEndTime !== undefined && operatingScheduleEndTime !== null && operatingScheduleEndTime !== '' ? operatingScheduleEndTime : (currentDetails.operatingScheduleEndTime || null),
+      operatingScheduleTimezone: operatingScheduleTimezone !== undefined && operatingScheduleTimezone !== null && operatingScheduleTimezone !== '' ? operatingScheduleTimezone : (currentDetails.operatingScheduleTimezone || 'Asia/Kolkata'),
       updatedAt: new Date().toISOString()
     };
     

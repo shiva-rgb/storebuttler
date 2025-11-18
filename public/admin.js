@@ -918,6 +918,9 @@ async function loadPaymentSettings() {
         document.getElementById('payment-instructions').value = storeDetails.instructions || '';
         document.getElementById('minimum-order-value').value = storeDetails.minimumOrderValue || '';
         
+        // Load operating schedule
+        loadOperatingSchedule(storeDetails);
+        
         // Update toggle switch and status text
         const toggle = document.getElementById('store-live-toggle');
         const statusText = document.getElementById('store-status-text');
@@ -1797,6 +1800,188 @@ function closeCustomerOrdersModal() {
     currentCustomerOrders = [];
     filteredCustomerOrders = [];
     currentCustomerId = null;
+}
+
+// Operating Schedule Functions
+function loadOperatingSchedule(storeDetails) {
+    const toggle = document.getElementById('operating-schedule-toggle');
+    const fields = document.getElementById('operating-schedule-fields');
+    
+    if (!toggle || !fields) return;
+    
+    // Set toggle state
+    toggle.checked = storeDetails.operatingScheduleEnabled || false;
+    
+    // Show/hide fields based on toggle
+    if (toggle.checked) {
+        fields.style.display = 'block';
+    } else {
+        fields.style.display = 'none';
+    }
+    
+    // Load days
+    if (storeDetails.operatingScheduleDays) {
+        const days = Array.isArray(storeDetails.operatingScheduleDays) 
+            ? storeDetails.operatingScheduleDays 
+            : JSON.parse(storeDetails.operatingScheduleDays || '[]');
+        
+        // Clear all checkboxes first
+        document.querySelectorAll('input[name="operating-days"]').forEach(cb => {
+            cb.checked = false;
+        });
+        
+        // Set checked days
+        days.forEach(day => {
+            const dayMap = { 0: 'sun', 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat' };
+            const checkbox = document.getElementById(`day-${dayMap[day]}`);
+            if (checkbox) {
+                checkbox.checked = true;
+            }
+        });
+    }
+    
+    // Load times
+    if (storeDetails.operatingScheduleStartTime) {
+        document.getElementById('operating-schedule-start-time').value = storeDetails.operatingScheduleStartTime;
+    }
+    if (storeDetails.operatingScheduleEndTime) {
+        document.getElementById('operating-schedule-end-time').value = storeDetails.operatingScheduleEndTime;
+    }
+    
+    // Load timezone
+    if (storeDetails.operatingScheduleTimezone) {
+        document.getElementById('operating-schedule-timezone').value = storeDetails.operatingScheduleTimezone;
+    }
+}
+
+function handleOperatingScheduleToggle() {
+    const toggle = document.getElementById('operating-schedule-toggle');
+    const fields = document.getElementById('operating-schedule-fields');
+    
+    if (!toggle || !fields) return;
+    
+    if (toggle.checked) {
+        fields.style.display = 'block';
+    } else {
+        fields.style.display = 'none';
+        // Save disabled state
+        saveOperatingSchedule(false);
+    }
+}
+
+async function saveOperatingSchedule(enabled = null) {
+    const toggle = document.getElementById('operating-schedule-toggle');
+    const statusDiv = document.getElementById('operating-schedule-status');
+    
+    if (!toggle) return;
+    
+    // If enabled is null, use toggle state; otherwise use provided value
+    const isEnabled = enabled !== null ? enabled : toggle.checked;
+    
+    if (!isEnabled) {
+        // Just disable the schedule
+        try {
+            const response = await fetch(`${API_BASE}/payment`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    operatingScheduleEnabled: false
+                })
+            });
+            
+            if (response.ok) {
+                if (statusDiv) {
+                    statusDiv.innerHTML = '<div class="success">Operating schedule disabled</div>';
+                    setTimeout(() => {
+                        statusDiv.innerHTML = '';
+                    }, 3000);
+                }
+            }
+        } catch (error) {
+            console.error('Error disabling operating schedule:', error);
+        }
+        return;
+    }
+    
+    // Get selected days
+    const selectedDays = Array.from(document.querySelectorAll('input[name="operating-days"]:checked'))
+        .map(cb => parseInt(cb.value));
+    
+    if (selectedDays.length === 0) {
+        if (statusDiv) {
+            statusDiv.innerHTML = '<div class="error">Please select at least one operating day</div>';
+        }
+        return;
+    }
+    
+    // Get times
+    const startTime = document.getElementById('operating-schedule-start-time').value;
+    const endTime = document.getElementById('operating-schedule-end-time').value;
+    
+    if (!startTime || !endTime) {
+        if (statusDiv) {
+            statusDiv.innerHTML = '<div class="error">Please set both start and end times</div>';
+        }
+        return;
+    }
+    
+    // Validate start time < end time
+    if (startTime >= endTime) {
+        if (statusDiv) {
+            statusDiv.innerHTML = '<div class="error">Start time must be before end time</div>';
+        }
+        return;
+    }
+    
+    // Get timezone
+    const timezone = document.getElementById('operating-schedule-timezone').value || 'Asia/Kolkata';
+    
+    try {
+        const response = await fetch(`${API_BASE}/payment`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                operatingScheduleEnabled: true,
+                operatingScheduleDays: selectedDays,
+                operatingScheduleStartTime: startTime,
+                operatingScheduleEndTime: endTime,
+                operatingScheduleTimezone: timezone
+            })
+        });
+        
+        if (response.status === 401) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        if (response.ok) {
+            const result = await response.json();
+            if (statusDiv) {
+                statusDiv.innerHTML = '<div class="success">Operating schedule saved successfully!</div>';
+                setTimeout(() => {
+                    statusDiv.innerHTML = '';
+                }, 3000);
+            }
+            // Reload settings to reflect changes
+            await loadPaymentSettings();
+        } else {
+            const error = await response.json();
+            if (statusDiv) {
+                statusDiv.innerHTML = `<div class="error">Error: ${error.error || 'Failed to save operating schedule'}</div>`;
+            }
+        }
+    } catch (error) {
+        console.error('Error saving operating schedule:', error);
+        if (statusDiv) {
+            statusDiv.innerHTML = '<div class="error">Error saving operating schedule. Please try again.</div>';
+        }
+    }
 }
 
 

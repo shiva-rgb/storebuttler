@@ -305,6 +305,81 @@
                     </form>
                     <div id="payment-status" style="margin-top: 15px;"></div>
                     
+                    <!-- Operating Schedule Section -->
+                    <div class="operating-schedule-section" style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+                        <h3 style="margin: 0 0 15px 0; color: #333;">🕐 Operating Schedule</h3>
+                        <p style="margin: 0 0 20px 0; color: #666; font-size: 0.9em;">
+                            Set specific hours when your store accepts orders. When operating schedule is enabled, it replaces the Live/Maintenance toggle.
+                        </p>
+                        
+                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+                            <label style="font-weight: 600; color: #333;">Enable Operating Schedule:</label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="operating-schedule-toggle" onchange="handleOperatingScheduleToggle()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div id="operating-schedule-fields" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+                            <div class="form-group">
+                                <label>Operating Days: <span style="color: red;">*</span></label>
+                                <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="1" id="day-mon">
+                                        <span>Monday</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="2" id="day-tue">
+                                        <span>Tuesday</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="3" id="day-wed">
+                                        <span>Wednesday</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="4" id="day-thu">
+                                        <span>Thursday</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="5" id="day-fri">
+                                        <span>Friday</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="6" id="day-sat">
+                                        <span>Saturday</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 12px; background: #fff; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                        <input type="checkbox" name="operating-days" value="0" id="day-sun">
+                                        <span>Sunday</span>
+                                    </label>
+                                </div>
+                                <small style="color: #666; display: block; margin-top: 10px;">Select the days when your store accepts orders</small>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                                <div class="form-group">
+                                    <label>Start Time: <span style="color: red;">*</span></label>
+                                    <input type="time" id="operating-schedule-start-time" required style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                </div>
+                                <div class="form-group">
+                                    <label>End Time: <span style="color: red;">*</span></label>
+                                    <input type="time" id="operating-schedule-end-time" required style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-top: 20px;">
+                                <label>Timezone:</label>
+                                <select id="operating-schedule-timezone" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                                    <option value="Asia/Kolkata" selected>IST (Indian Standard Time)</option>
+                                </select>
+                                <small style="color: #666; display: block; margin-top: 5px;">Timezone for operating hours (default: IST)</small>
+                            </div>
+                            
+                            <button type="button" onclick="saveOperatingSchedule()" class="submit-btn" style="margin-top: 20px;">Save Operating Schedule</button>
+                            <div id="operating-schedule-status" style="margin-top: 15px;"></div>
+                        </div>
+                    </div>
+                    
                     <!-- Payment Settings Section -->
                     <div class="payment-settings-section" style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
                         <h3 style="margin: 0 0 15px 0; color: #333;">💳 Payment Settings</h3>

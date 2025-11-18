@@ -651,7 +651,15 @@ async function getStoreDetailsBySlug(storeSlug) {
        ORDER BY id LIMIT 1`,
       [storeSlug.toLowerCase(), `%${storeSlug.toLowerCase()}%`]
     );
-    return result.rows[0] || null;
+    if (result.rows.length === 0) {
+      return null;
+    }
+    const row = result.rows[0];
+    return {
+      ...row,
+      operating_schedule_start_time: row.operating_schedule_start_time ? row.operating_schedule_start_time.substring(0, 5) : null,
+      operating_schedule_end_time: row.operating_schedule_end_time ? row.operating_schedule_end_time.substring(0, 5) : null
+    };
   } catch (error) {
     console.error('Error getting store details by slug:', error);
     throw error;
@@ -699,28 +707,38 @@ async function getStoreDetails(userId) {
         email: '',
         address: '',
         instructions: '',
-        minimumOrderValue: null,
-        isLive: false,
-        onlinePaymentEnabled: false,
-        razorpayKeyId: null,
-        updatedAt: null
-      };
-    }
-    
-    const row = result.rows[0];
-    return {
-      storeName: row.store_name || '',
-      contactNumber1: row.contact_number_1 || '',
-      contactNumber2: row.contact_number_2 || '',
-      email: row.email || '',
-      address: row.address || '',
-      instructions: row.instructions || '',
-      minimumOrderValue: row.minimum_order_value !== null && row.minimum_order_value !== undefined ? parseFloat(row.minimum_order_value) : null,
-      isLive: row.is_live || false,
-      onlinePaymentEnabled: row.online_payment_enabled || false,
-      razorpayKeyId: row.razorpay_key_id || null,
-      updatedAt: row.updated_at ? row.updated_at.toISOString() : null
+      minimumOrderValue: null,
+      isLive: false,
+      onlinePaymentEnabled: false,
+      razorpayKeyId: null,
+      operatingScheduleEnabled: false,
+      operatingScheduleDays: null,
+      operatingScheduleStartTime: null,
+      operatingScheduleEndTime: null,
+      operatingScheduleTimezone: 'Asia/Kolkata',
+      updatedAt: null
     };
+  }
+  
+  const row = result.rows[0];
+  return {
+    storeName: row.store_name || '',
+    contactNumber1: row.contact_number_1 || '',
+    contactNumber2: row.contact_number_2 || '',
+    email: row.email || '',
+    address: row.address || '',
+    instructions: row.instructions || '',
+    minimumOrderValue: row.minimum_order_value !== null && row.minimum_order_value !== undefined ? parseFloat(row.minimum_order_value) : null,
+    isLive: row.is_live || false,
+    onlinePaymentEnabled: row.online_payment_enabled || false,
+    razorpayKeyId: row.razorpay_key_id || null,
+    operatingScheduleEnabled: row.operating_schedule_enabled || false,
+    operatingScheduleDays: row.operating_schedule_days || null,
+    operatingScheduleStartTime: row.operating_schedule_start_time ? row.operating_schedule_start_time.substring(0, 5) : null, // Return HH:MM format
+    operatingScheduleEndTime: row.operating_schedule_end_time ? row.operating_schedule_end_time.substring(0, 5) : null, // Return HH:MM format
+    operatingScheduleTimezone: row.operating_schedule_timezone || 'Asia/Kolkata',
+    updatedAt: row.updated_at ? row.updated_at.toISOString() : null
+  };
   } catch (error) {
     console.error('Error getting store details:', error);
     throw error;
@@ -751,6 +769,11 @@ async function updateStoreDetails(details, userId, keepExistingSecret = false) {
       onlinePaymentEnabled = false,
       razorpayKeyId = null,
       razorpayKeySecret = null,
+      operatingScheduleEnabled = false,
+      operatingScheduleDays = null,
+      operatingScheduleStartTime = null,
+      operatingScheduleEndTime = null,
+      operatingScheduleTimezone = 'Asia/Kolkata',
       updatedAt = new Date().toISOString()
     } = details;
 
@@ -764,10 +787,10 @@ async function updateStoreDetails(details, userId, keepExistingSecret = false) {
     if (existing.rows.length === 0) {
       // Insert new record
       result = await client.query(
-        `INSERT INTO store_details (store_name, contact_number_1, contact_number_2, email, address, instructions, minimum_order_value, updated_at, user_id, is_live, online_payment_enabled, razorpay_key_id, razorpay_key_secret)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO store_details (store_name, contact_number_1, contact_number_2, email, address, instructions, minimum_order_value, updated_at, user_id, is_live, online_payment_enabled, razorpay_key_id, razorpay_key_secret, operating_schedule_enabled, operating_schedule_days, operating_schedule_start_time, operating_schedule_end_time, operating_schedule_timezone)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
          RETURNING *`,
-        [storeName, contactNumber1, contactNumber2, email, address, instructions, minimumOrderValue, updatedAt, userId, isLive, onlinePaymentEnabled, razorpayKeyId, razorpayKeySecret]
+        [storeName, contactNumber1, contactNumber2, email, address, instructions, minimumOrderValue, updatedAt, userId, isLive, onlinePaymentEnabled, razorpayKeyId, razorpayKeySecret, operatingScheduleEnabled, operatingScheduleDays ? JSON.stringify(operatingScheduleDays) : null, operatingScheduleStartTime, operatingScheduleEndTime, operatingScheduleTimezone]
       );
     } else {
       // Update existing record - only update bank details if they are provided
@@ -812,6 +835,28 @@ async function updateStoreDetails(details, userId, keepExistingSecret = false) {
         updateValues.push(razorpayKeySecret);
       }
       
+      // Update operating schedule fields if provided
+      if (operatingScheduleEnabled !== undefined) {
+        updateFields.push(`operating_schedule_enabled = $${paramCount++}`);
+        updateValues.push(operatingScheduleEnabled);
+      }
+      if (operatingScheduleDays !== undefined) {
+        updateFields.push(`operating_schedule_days = $${paramCount++}`);
+        updateValues.push(operatingScheduleDays ? JSON.stringify(operatingScheduleDays) : null);
+      }
+      if (operatingScheduleStartTime !== undefined) {
+        updateFields.push(`operating_schedule_start_time = $${paramCount++}`);
+        updateValues.push(operatingScheduleStartTime);
+      }
+      if (operatingScheduleEndTime !== undefined) {
+        updateFields.push(`operating_schedule_end_time = $${paramCount++}`);
+        updateValues.push(operatingScheduleEndTime);
+      }
+      if (operatingScheduleTimezone !== undefined) {
+        updateFields.push(`operating_schedule_timezone = $${paramCount++}`);
+        updateValues.push(operatingScheduleTimezone);
+      }
+      
       updateValues.push(userId);
       
       result = await client.query(
@@ -837,6 +882,11 @@ async function updateStoreDetails(details, userId, keepExistingSecret = false) {
       isLive: row.is_live || false,
       onlinePaymentEnabled: row.online_payment_enabled || false,
       razorpayKeyId: row.razorpay_key_id || null,
+      operatingScheduleEnabled: row.operating_schedule_enabled || false,
+      operatingScheduleDays: row.operating_schedule_days || null,
+      operatingScheduleStartTime: row.operating_schedule_start_time ? row.operating_schedule_start_time.substring(0, 5) : null,
+      operatingScheduleEndTime: row.operating_schedule_end_time ? row.operating_schedule_end_time.substring(0, 5) : null,
+      operatingScheduleTimezone: row.operating_schedule_timezone || 'Asia/Kolkata',
       updatedAt: row.updated_at ? row.updated_at.toISOString() : null
     };
   } catch (error) {
@@ -1191,6 +1241,68 @@ async function getAllCustomers() {
   }
 }
 
+/**
+ * Check if store is currently operating based on schedule
+ * @param {object} storeDetails - Store details object with operating schedule fields
+ * @returns {boolean} - True if store is operating, false otherwise
+ */
+function isStoreOperatingNow(storeDetails) {
+  // If schedule is not enabled, fall back to isLive
+  if (!storeDetails.operatingScheduleEnabled) {
+    return storeDetails.isLive || false;
+  }
+  
+  // If schedule is enabled but days/times are not set, return false
+  if (!storeDetails.operatingScheduleDays || 
+      !storeDetails.operatingScheduleStartTime || 
+      !storeDetails.operatingScheduleEndTime) {
+    return false;
+  }
+  
+  // Get current time in IST (UTC+5:30)
+  const now = new Date();
+  // Convert to IST: UTC + 5:30 hours
+  const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  // Get current day in IST (0=Sunday, 1=Monday, etc.)
+  // Use UTC methods since we've already adjusted for IST offset
+  const currentDay = istTime.getUTCDay();
+  
+  // Parse operating schedule days (should be array of day numbers)
+  let operatingDays = [];
+  if (Array.isArray(storeDetails.operatingScheduleDays)) {
+    operatingDays = storeDetails.operatingScheduleDays;
+  } else if (typeof storeDetails.operatingScheduleDays === 'string') {
+    try {
+      operatingDays = JSON.parse(storeDetails.operatingScheduleDays);
+    } catch (e) {
+      console.error('Error parsing operating schedule days:', e);
+      return false;
+    }
+  }
+  
+  // Check if today is in operating days
+  if (!operatingDays.includes(currentDay)) {
+    return false;
+  }
+  
+  // Get current time in minutes since midnight (IST)
+  // Use UTC methods since we've already adjusted the timestamp for IST
+  const currentHours = istTime.getUTCHours();
+  const currentMinutes = istTime.getUTCMinutes();
+  const currentTime = currentHours * 60 + currentMinutes;
+  
+  // Parse start and end times (HH:MM format)
+  const [startHour, startMin] = storeDetails.operatingScheduleStartTime.split(':').map(Number);
+  const [endHour, endMin] = storeDetails.operatingScheduleEndTime.split(':').map(Number);
+  const startTime = startHour * 60 + startMin;
+  const endTime = endHour * 60 + endMin;
+  
+  // Check if current time is within operating hours
+  return currentTime >= startTime && currentTime < endTime;
+}
+
 module.exports = {
   generateOrderId,
   // Product functions
@@ -1229,6 +1341,7 @@ module.exports = {
   getCustomerById,
   getCustomerOrders,
   getCustomerOrdersForAdmin,
-  getAllCustomers
+  getAllCustomers,
+  isStoreOperatingNow
 };
 

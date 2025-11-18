@@ -21,6 +21,7 @@ If you have the external database URL, use this method:
    psql "YOUR_EXTERNAL_URL" -f migrations/014_remove_unused_bank_details_columns.sql
    psql "YOUR_EXTERNAL_URL" -f migrations/015_remove_gstin_from_store_details.sql
    psql "YOUR_EXTERNAL_URL" -f migrations/016_add_minimum_order_value.sql
+   psql "YOUR_EXTERNAL_URL" -f migrations/017_add_operating_schedule.sql
    ```
 
    **OR connect manually:**
@@ -79,6 +80,15 @@ ALTER TABLE store_details DROP COLUMN IF EXISTS gstin;
 ### Migration 5: Add Minimum Order Value
 ```sql
 ALTER TABLE store_details ADD COLUMN IF NOT EXISTS minimum_order_value DECIMAL(10, 2);
+```
+
+### Migration 6: Add Operating Schedule
+```sql
+ALTER TABLE store_details ADD COLUMN IF NOT EXISTS operating_schedule_enabled BOOLEAN DEFAULT false;
+ALTER TABLE store_details ADD COLUMN IF NOT EXISTS operating_schedule_days JSONB;
+ALTER TABLE store_details ADD COLUMN IF NOT EXISTS operating_schedule_start_time TIME;
+ALTER TABLE store_details ADD COLUMN IF NOT EXISTS operating_schedule_end_time TIME;
+ALTER TABLE store_details ADD COLUMN IF NOT EXISTS operating_schedule_timezone VARCHAR(50) DEFAULT 'Asia/Kolkata';
 ```
 
 ## Done!

@@ -788,7 +788,8 @@ async function updateStoreDetails(details, userId, keepExistingSecret = false) {
       updateValues.push(address);
       updateFields.push(`instructions = $${paramCount++}`);
       updateValues.push(instructions);
-      if (minimumOrderValue !== undefined && minimumOrderValue !== null) {
+      // Update minimum_order_value if provided (including null to clear it)
+      if (minimumOrderValue !== undefined) {
         updateFields.push(`minimum_order_value = $${paramCount++}`);
         updateValues.push(minimumOrderValue);
       }

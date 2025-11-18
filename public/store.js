@@ -471,20 +471,25 @@ async function loadStoreDetails(storeSlug = 'guest') {
         
         // Show/hide online payment option based on store settings
         const onlinePaymentOption = document.getElementById('online-payment-option');
+        console.log('[STORE] Online payment enabled:', paymentSettings?.onlinePaymentEnabled);
         if (onlinePaymentOption) {
-            if (paymentSettings && paymentSettings.onlinePaymentEnabled) {
+            if (paymentSettings && paymentSettings.onlinePaymentEnabled === true) {
+                console.log('[STORE] Showing online payment option');
                 onlinePaymentOption.style.display = 'flex';
                 const onlineRadio = onlinePaymentOption.querySelector('input[name="payment-method"][value="online"]');
                 if (onlineRadio) {
                     onlineRadio.disabled = false;
                 }
             } else {
+                console.log('[STORE] Hiding online payment option');
                 onlinePaymentOption.style.display = 'none';
                 const codRadio = document.querySelector('input[name="payment-method"][value="cod"]');
                 if (codRadio) {
                     codRadio.checked = true;
                 }
             }
+        } else {
+            console.error('[STORE] online-payment-option element not found!');
         }
         
         // Update cart UI to show minimum order value message if needed

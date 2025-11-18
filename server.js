@@ -478,7 +478,7 @@ app.get('/api/store/:storeSlug/details', async (req, res) => {
       instructions: store.instructions || '',
       minimumOrderValue: store.minimum_order_value !== null && store.minimum_order_value !== undefined ? parseFloat(store.minimum_order_value) : null,
       isLive: store.is_live || false,
-      onlinePaymentEnabled: store.online_payment_enabled || false,
+      onlinePaymentEnabled: store.online_payment_enabled === true || store.online_payment_enabled === 'true',
       razorpayKeyId: store.razorpay_key_id || null
     });
   } catch (error) {
@@ -839,6 +839,10 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Address is required' });
     }
     
+    // Get current store details to preserve isLive and onlinePaymentEnabled if not provided
+    const { getStoreDetails } = require('./db/queries');
+    const currentDetails = await getStoreDetails(req.user.id);
+    
     const storeDetails = {
       storeName: storeName.trim(),
       contactNumber1: contactNumber1.trim(),
@@ -846,8 +850,11 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       email: (email || '').trim(),
       address: address.trim(),
       instructions: (instructions || '').trim(),
-      isLive: isLive === true || isLive === 'true' || false,
-      minimumOrderValue: minimumOrderValue !== undefined && minimumOrderValue !== null ? parseFloat(minimumOrderValue) : null,
+      // Preserve existing isLive if not provided, otherwise use the provided value
+      isLive: isLive !== undefined ? (isLive === true || isLive === 'true') : (currentDetails.isLive || false),
+      // Preserve existing onlinePaymentEnabled if not provided
+      onlinePaymentEnabled: currentDetails.onlinePaymentEnabled || false,
+      minimumOrderValue: minimumOrderValue !== undefined && minimumOrderValue !== null && minimumOrderValue !== '' ? parseFloat(minimumOrderValue) : null,
       updatedAt: new Date().toISOString()
     };
     
@@ -916,10 +923,18 @@ app.post('/api/razorpay/create-order', async (req, res) => {
     // Decrypt the key_secret
     let keySecret;
     try {
+      if (!store.razorpay_key_secret) {
+        console.error('[SERVER] Razorpay key_secret is missing in database');
+        return res.status(500).json({ error: 'Payment configuration error: Razorpay secret key is missing. Please re-enter your Razorpay keys in store settings.' });
+      }
       keySecret = decrypt(store.razorpay_key_secret);
+      if (!keySecret) {
+        throw new Error('Decryption returned empty result');
+      }
     } catch (decryptError) {
-      console.error('Error decrypting Razorpay key secret:', decryptError);
-      return res.status(500).json({ error: 'Error processing payment configuration' });
+      console.error('[SERVER] Error decrypting Razorpay key secret:', decryptError);
+      console.error('[SERVER] This usually means the ENCRYPTION_KEY has changed or the stored key is corrupted.');
+      return res.status(500).json({ error: 'Payment configuration error: Unable to decrypt Razorpay keys. Please re-enter your Razorpay keys in store settings. If the issue persists, check your ENCRYPTION_KEY environment variable.' });
     }
     
     // Initialize Razorpay with store-specific keys
@@ -987,10 +1002,18 @@ app.post('/api/razorpay/verify-payment', async (req, res) => {
     // Decrypt the key_secret
     let keySecret;
     try {
+      if (!store.razorpay_key_secret) {
+        console.error('[SERVER] Razorpay key_secret is missing in database');
+        return res.status(500).json({ error: 'Payment configuration error: Razorpay secret key is missing. Please re-enter your Razorpay keys in store settings.' });
+      }
       keySecret = decrypt(store.razorpay_key_secret);
+      if (!keySecret) {
+        throw new Error('Decryption returned empty result');
+      }
     } catch (decryptError) {
-      console.error('Error decrypting Razorpay key secret:', decryptError);
-      return res.status(500).json({ error: 'Error processing payment configuration' });
+      console.error('[SERVER] Error decrypting Razorpay key secret:', decryptError);
+      console.error('[SERVER] This usually means the ENCRYPTION_KEY has changed or the stored key is corrupted.');
+      return res.status(500).json({ error: 'Payment configuration error: Unable to decrypt Razorpay keys. Please re-enter your Razorpay keys in store settings. If the issue persists, check your ENCRYPTION_KEY environment variable.' });
     }
     
     // Verify signature using store-specific key_secret

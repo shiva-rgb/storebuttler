@@ -44,8 +44,13 @@ async function checkAuthAndLoadOrders() {
     }
 }
 
-async function loadOrders() {
+async function loadOrders(showLoading = false) {
     try {
+        if (showLoading) {
+            document.getElementById('orders-container').innerHTML = 
+                '<p class="loading">Loading orders...</p>';
+        }
+        
         const response = await fetch(`${API_BASE}/customer/orders`, {
             credentials: 'include'
         });
@@ -66,6 +71,25 @@ async function loadOrders() {
         console.error('Error loading orders:', error);
         document.getElementById('orders-container').innerHTML = 
             '<p class="loading" style="color: red;">Error loading orders. Please try again.</p>';
+    }
+}
+
+async function refreshOrders() {
+    const refreshBtn = document.getElementById('refresh-btn');
+    const refreshIcon = document.getElementById('refresh-icon');
+    
+    // Disable button and show spinning animation
+    refreshBtn.classList.add('loading');
+    refreshIcon.classList.add('spinning');
+    
+    try {
+        await loadOrders(true);
+    } finally {
+        // Re-enable button and stop animation after a short delay
+        setTimeout(() => {
+            refreshBtn.classList.remove('loading');
+            refreshIcon.classList.remove('spinning');
+        }, 500);
     }
 }
 
@@ -97,6 +121,24 @@ function displayOrders() {
             </div>
         `).join('');
         
+        // Payment status display
+        const paymentStatusHtml = order.paymentMethod === 'online' 
+            ? `<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                    <strong style="color: #666;">Payment:</strong>
+                    <span style="background: ${order.paymentStatus === 'paid' ? '#28a745' : order.paymentStatus === 'failed' ? '#dc3545' : '#ffc107'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">
+                        ${order.paymentStatus === 'paid' ? 'Paid Online' : order.paymentStatus === 'failed' ? 'Payment Failed' : 'Payment Pending'}
+                    </span>
+                </div>
+                ${order.razorpayPaymentId ? `<div style="color: #666; font-size: 0.85em; margin-top: 5px;">Payment ID: ${order.razorpayPaymentId}</div>` : ''}
+            </div>`
+            : `<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <strong style="color: #666;">Payment:</strong>
+                    <span style="background: #6c757d; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">COD</span>
+                </div>
+            </div>`;
+        
         return `
             <div class="order-card">
                 <div class="order-header">
@@ -110,6 +152,7 @@ function displayOrders() {
                     ${itemsHtml}
                 </div>
                 <div class="order-total">Total: ₹${order.total.toFixed(2)}</div>
+                ${paymentStatusHtml}
                 <button class="repeat-order-btn" onclick="repeatOrder('${order.id}')">Repeat this order</button>
             </div>
         `;

@@ -7,6 +7,9 @@ const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
+const { encrypt, decrypt } = require('./config/encryption');
 require('dotenv').config();
 
 // Import database query functions
@@ -18,8 +21,10 @@ const {
   deleteProduct,
   bulkInsertProducts,
   getAllOrders,
+  generateOrderId,
   createOrder,
   updateOrderStatus,
+  updateOrderPaymentStatus,
   getStoreDetails,
   updateStoreDetails
 } = require('./db/queries');
@@ -470,10 +475,11 @@ app.get('/api/store/:storeSlug/details', async (req, res) => {
       contactNumber2: store.contact_number_2 || '',
       email: store.email || '',
       address: store.address || '',
-      gstin: store.gstin || '',
-      upiId: store.upi_id || '',
       instructions: store.instructions || '',
-      isLive: store.is_live || false
+      minimumOrderValue: store.minimum_order_value !== null && store.minimum_order_value !== undefined ? parseFloat(store.minimum_order_value) : null,
+      isLive: store.is_live || false,
+      onlinePaymentEnabled: store.online_payment_enabled || false,
+      razorpayKeyId: store.razorpay_key_id || null
     });
   } catch (error) {
     console.error('Error getting store details:', error);
@@ -484,7 +490,22 @@ app.get('/api/store/:storeSlug/details', async (req, res) => {
 // Create order
 app.post('/api/orders', async (req, res) => {
   try {
-    const { items, customerInfo, storeSlug } = req.body;
+    const { 
+      id,
+      items, 
+      customerInfo, 
+      storeSlug,
+      paymentMethod = 'cod',
+      paymentStatus = 'paid',
+      razorpayOrderId = null
+    } = req.body;
+    
+    console.log('[SERVER] Creating order:', {
+      id,
+      paymentMethod,
+      paymentStatus,
+      itemCount: items?.length
+    });
     
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Invalid order items' });
@@ -520,20 +541,34 @@ app.post('/api/orders', async (req, res) => {
       return sum + (price * item.quantity);
     }, 0);
 
+    // Generate order ID if not provided
+    let orderId = id;
+    if (!orderId) {
+      orderId = await generateOrderId();
+    }
+    
     // Create order (this handles validation, inventory updates, and order creation in a transaction)
     const order = {
-      id: `order_${Date.now()}`,
+      id: orderId,
       items: items,
       customerInfo: customerInfo || {},
       status: 'pending',
       total: total,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      razorpayOrderId: razorpayOrderId
     };
 
     const createdOrder = await createOrder(order, null, customerId);
+    console.log('[SERVER] Order created successfully:', {
+      id: createdOrder.id,
+      paymentMethod: createdOrder.paymentMethod,
+      paymentStatus: createdOrder.paymentStatus
+    });
     res.json({ success: true, order: createdOrder });
   } catch (error) {
-    console.error('Error creating order:', error);
+    console.error('[SERVER] Error creating order:', error);
     res.status(500).json({ error: error.message || 'Error creating order: ' + error.message });
   }
 });
@@ -609,14 +644,94 @@ app.get('/api/admin/customers', authenticateToken, async (req, res) => {
   }
 });
 
+// Admin customer orders endpoint (protected)
+app.get('/api/admin/customers/:customerId/orders', authenticateToken, async (req, res) => {
+  try {
+    const { getCustomerOrdersForAdmin } = require('./db/queries');
+    const customerId = parseInt(req.params.customerId);
+    const userId = req.user.id;
+    
+    if (isNaN(customerId)) {
+      return res.status(400).json({ error: 'Invalid customer ID' });
+    }
+    
+    const orders = await getCustomerOrdersForAdmin(customerId, userId);
+    res.json(orders);
+  } catch (error) {
+    console.error('Error getting customer orders:', error);
+    res.status(500).json({ error: 'Error fetching customer orders: ' + error.message });
+  }
+});
+
 // Get payment settings
 app.get('/api/payment', authenticateToken, async (req, res) => {
   try {
     const payment = await getStoreDetails(req.user.id);
-    res.json(payment);
+    // Include Razorpay key_id but not key_secret for security
+    res.json({
+      ...payment,
+      razorpayKeyId: payment.razorpayKeyId || null
+      // key_secret is not returned for security
+    });
   } catch (error) {
     console.error('Error getting store details:', error);
     res.status(500).json({ error: 'Error fetching store details: ' + error.message });
+  }
+});
+
+// Save Razorpay API keys (protected)
+app.put('/api/payment/razorpay-keys', authenticateToken, async (req, res) => {
+  try {
+    const { razorpayKeyId, razorpayKeySecret, onlinePaymentEnabled, keepExistingSecret } = req.body;
+    
+    if (!razorpayKeyId) {
+      return res.status(400).json({ error: 'Razorpay Key ID is required' });
+    }
+    
+    // Get current store details
+    const currentDetails = await getStoreDetails(req.user.id);
+    
+    if (!currentDetails.storeName) {
+      return res.status(400).json({ error: 'Store details must be configured first. Please set up your store details.' });
+    }
+    
+    // Prepare update object
+    const updateData = {
+      storeName: currentDetails.storeName,
+      contactNumber1: currentDetails.contactNumber1,
+      contactNumber2: currentDetails.contactNumber2 || '',
+      email: currentDetails.email || '',
+      address: currentDetails.address,
+      instructions: currentDetails.instructions || '',
+      isLive: currentDetails.isLive || false,
+      razorpayKeyId: razorpayKeyId,
+      onlinePaymentEnabled: onlinePaymentEnabled !== undefined ? onlinePaymentEnabled : true
+    };
+    
+    // If keepExistingSecret is true, don't include key_secret (it will be preserved)
+    // Otherwise, require and encrypt the new key_secret
+    if (!keepExistingSecret) {
+      if (!razorpayKeySecret) {
+        return res.status(400).json({ error: 'Razorpay Key Secret is required' });
+      }
+      // Encrypt the key_secret before storing
+      updateData.razorpayKeySecret = encrypt(razorpayKeySecret);
+    }
+    // If keepExistingSecret is true, we don't include razorpayKeySecret in updateData,
+    // and updateStoreDetails will skip updating it
+    
+    // Update store details with Razorpay keys
+    const updatedDetails = await updateStoreDetails(updateData, req.user.id, keepExistingSecret);
+    
+    res.json({ 
+      success: true, 
+      razorpayKeyId: updatedDetails.razorpayKeyId,
+      onlinePaymentEnabled: updatedDetails.onlinePaymentEnabled
+    });
+  } catch (error) {
+    console.error('[SERVER] Error saving Razorpay keys:', error);
+    console.error('[SERVER] Error stack:', error.stack);
+    res.status(500).json({ error: 'Error saving Razorpay keys: ' + error.message });
   }
 });
 
@@ -640,8 +755,6 @@ app.put('/api/store/live-status', authenticateToken, async (req, res) => {
       contactNumber2: currentDetails.contactNumber2 || '',
       email: currentDetails.email || '',
       address: currentDetails.address,
-      gstin: currentDetails.gstin || '',
-      upiId: currentDetails.upiId || '', // UPI ID is optional (disabled)
       instructions: currentDetails.instructions || '',
       isLive: isLive === true || isLive === 'true'
     }, req.user.id);
@@ -650,6 +763,42 @@ app.put('/api/store/live-status', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error updating store live status:', error);
     res.status(500).json({ error: 'Error updating store status: ' + error.message });
+  }
+});
+
+// Update online payment status (protected)
+app.put('/api/payment/online-payment-status', authenticateToken, async (req, res) => {
+  try {
+    const { onlinePaymentEnabled } = req.body;
+    const { getStoreDetails, updateStoreDetails } = require('./db/queries');
+    
+    // Get current store details
+    const currentDetails = await getStoreDetails(req.user.id);
+    
+    if (!currentDetails.storeName) {
+      return res.status(400).json({ error: 'Store details must be configured first. Please set up your store details.' });
+    }
+    
+    // Update only the online payment enabled status
+    const updatedDetails = await updateStoreDetails({
+      storeName: currentDetails.storeName,
+      contactNumber1: currentDetails.contactNumber1,
+      contactNumber2: currentDetails.contactNumber2 || '',
+      email: currentDetails.email || '',
+      address: currentDetails.address,
+      instructions: currentDetails.instructions || '',
+      isLive: currentDetails.isLive || false,
+      onlinePaymentEnabled: onlinePaymentEnabled === true || onlinePaymentEnabled === 'true'
+    }, req.user.id);
+    
+    res.json({ 
+      success: true, 
+      onlinePaymentEnabled: updatedDetails.onlinePaymentEnabled 
+    });
+  } catch (error) {
+    console.error('[SERVER] Error updating online payment status:', error);
+    console.error('[SERVER] Error stack:', error.stack);
+    res.status(500).json({ error: 'Error updating online payment status: ' + error.message });
   }
 });
 
@@ -662,22 +811,20 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       contactNumber1, 
       contactNumber2, 
       email,
-      upiId, 
       instructions, 
       address, 
-      gstin,
-      isLive
+      isLive,
+      minimumOrderValue
     } = req.body;
     console.log('Received store details data:', { 
       storeName, 
       contactNumber1, 
       contactNumber2, 
       email,
-      upiId, 
       instructions, 
       address, 
-      gstin,
-      isLive
+      isLive,
+      minimumOrderValue
     });
     
     if (!storeName || storeName.trim() === '') {
@@ -692,21 +839,15 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Address is required' });
     }
     
-    // UPI ID is now optional (disabled)
-    // if (!upiId || upiId.trim() === '') {
-    //   return res.status(400).json({ error: 'UPI ID is required' });
-    // }
-    
     const storeDetails = {
       storeName: storeName.trim(),
       contactNumber1: contactNumber1.trim(),
       contactNumber2: (contactNumber2 || '').trim(),
       email: (email || '').trim(),
       address: address.trim(),
-      gstin: (gstin || '').trim(),
-      upiId: (upiId || '').trim(), // UPI ID is optional (disabled)
       instructions: (instructions || '').trim(),
       isLive: isLive === true || isLive === 'true' || false,
+      minimumOrderValue: minimumOrderValue !== undefined && minimumOrderValue !== null ? parseFloat(minimumOrderValue) : null,
       updatedAt: new Date().toISOString()
     };
     
@@ -715,6 +856,169 @@ app.put('/api/payment', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error saving store details:', error);
     res.status(500).json({ error: 'Error saving store details: ' + error.message });
+  }
+});
+
+
+// Razorpay Integration Endpoints
+
+// Get Razorpay public key for a store (key_id is safe to expose)
+app.get('/api/razorpay/key/:storeSlug', async (req, res) => {
+  try {
+    const { storeSlug } = req.params;
+    const { getStoreDetailsBySlug } = require('./db/queries');
+    const store = await getStoreDetailsBySlug(storeSlug);
+    
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+    
+    if (!store.online_payment_enabled || !store.razorpay_key_id) {
+      return res.status(400).json({ error: 'Online payment is not enabled for this store' });
+    }
+    
+    res.json({
+      key: store.razorpay_key_id
+    });
+  } catch (error) {
+    console.error('Error getting Razorpay key:', error);
+    res.status(500).json({ error: 'Error getting payment key' });
+  }
+});
+
+// Create Razorpay order using store-specific keys
+app.post('/api/razorpay/create-order', async (req, res) => {
+  try {
+    const { amount, currency = 'INR', receipt, notes, storeSlug } = req.body;
+    
+    if (!storeSlug) {
+      return res.status(400).json({ error: 'Store slug is required' });
+    }
+    
+    console.log('[SERVER] Creating Razorpay order for store:', storeSlug, { amount, currency, receipt });
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+    
+    // Get store details to retrieve Razorpay keys
+    const { getStoreDetailsBySlug } = require('./db/queries');
+    const store = await getStoreDetailsBySlug(storeSlug);
+    
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+    
+    if (!store.online_payment_enabled || !store.razorpay_key_id || !store.razorpay_key_secret) {
+      return res.status(400).json({ error: 'Online payment is not properly configured for this store' });
+    }
+    
+    // Decrypt the key_secret
+    let keySecret;
+    try {
+      keySecret = decrypt(store.razorpay_key_secret);
+    } catch (decryptError) {
+      console.error('Error decrypting Razorpay key secret:', decryptError);
+      return res.status(500).json({ error: 'Error processing payment configuration' });
+    }
+    
+    // Initialize Razorpay with store-specific keys
+    const razorpay = new Razorpay({
+      key_id: store.razorpay_key_id,
+      key_secret: keySecret
+    });
+    
+    // Convert amount to paise (Razorpay expects amount in smallest currency unit)
+    const amountInPaise = Math.round(amount * 100);
+    console.log('[SERVER] Amount in paise:', amountInPaise);
+    
+    const options = {
+      amount: amountInPaise,
+      currency: currency,
+      receipt: receipt || `receipt_${Date.now()}`,
+      notes: notes || {}
+    };
+    
+    const razorpayOrder = await razorpay.orders.create(options);
+    console.log('[SERVER] Razorpay order created:', razorpayOrder.id);
+    
+    res.json({
+      success: true,
+      order: {
+        id: razorpayOrder.id,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        receipt: razorpayOrder.receipt
+      }
+    });
+  } catch (error) {
+    console.error('[SERVER] Error creating Razorpay order:', error);
+    res.status(500).json({ error: 'Error creating payment order: ' + error.message });
+  }
+});
+
+// Verify payment and update order using store-specific keys
+app.post('/api/razorpay/verify-payment', async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      order_id,
+      storeSlug
+    } = req.body;
+    
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !order_id || !storeSlug) {
+      return res.status(400).json({ error: 'Missing required payment verification fields' });
+    }
+    
+    // Get store details to retrieve Razorpay keys
+    const { getStoreDetailsBySlug, updateOrderPaymentStatus } = require('./db/queries');
+    const store = await getStoreDetailsBySlug(storeSlug);
+    
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+    
+    if (!store.online_payment_enabled || !store.razorpay_key_id || !store.razorpay_key_secret) {
+      return res.status(400).json({ error: 'Online payment is not properly configured for this store' });
+    }
+    
+    // Decrypt the key_secret
+    let keySecret;
+    try {
+      keySecret = decrypt(store.razorpay_key_secret);
+    } catch (decryptError) {
+      console.error('Error decrypting Razorpay key secret:', decryptError);
+      return res.status(500).json({ error: 'Error processing payment configuration' });
+    }
+    
+    // Verify signature using store-specific key_secret
+    const text = razorpay_order_id + '|' + razorpay_payment_id;
+    const generatedSignature = crypto
+      .createHmac('sha256', keySecret)
+      .update(text)
+      .digest('hex');
+    
+    if (generatedSignature !== razorpay_signature) {
+      return res.status(400).json({ error: 'Invalid payment signature' });
+    }
+    
+    // Update order with payment details
+    await updateOrderPaymentStatus(order_id, {
+      paymentStatus: 'paid',
+      razorpayPaymentId: razorpay_payment_id,
+      razorpayOrderId: razorpay_order_id,
+      razorpaySignature: razorpay_signature
+    });
+    
+    res.json({
+      success: true,
+      message: 'Payment verified and order updated successfully'
+    });
+  } catch (error) {
+    console.error('Error verifying payment:', error);
+    res.status(500).json({ error: 'Error verifying payment: ' + error.message });
   }
 });
 

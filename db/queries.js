@@ -281,11 +281,67 @@ async function getAllOrders(userId) {
       },
       status: order.status,
       createdAt: order.created_at.toISOString(),
-      total: parseFloat(order.total)
+      total: parseFloat(order.total),
+      paymentMethod: order.payment_method || 'cod',
+      paymentStatus: order.payment_status || 'pending',
+      razorpayPaymentId: order.razorpay_payment_id,
+      razorpayOrderId: order.razorpay_order_id,
+      razorpaySignature: order.razorpay_signature
     }));
   } catch (error) {
     console.error('Error getting all orders:', error);
     throw error;
+  }
+}
+
+/**
+ * Generate a new order ID in format: yyyymmdd<orderid>
+ * Example: 2025111801 (2025-11-18, order #01)
+ * @returns {Promise<string>} - Generated order ID
+ */
+async function generateOrderId() {
+  try {
+    // Get today's date in yyyymmdd format
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const datePrefix = `${year}${month}${day}`;
+    
+    // Find all order IDs that start with today's date prefix
+    const result = await pool.query(
+      `SELECT id FROM orders WHERE id LIKE $1 ORDER BY id DESC LIMIT 100`,
+      [`${datePrefix}%`]
+    );
+    
+    // Extract sequential numbers from existing order IDs
+    let maxSequence = 0;
+    result.rows.forEach(row => {
+      const orderId = row.id;
+      // Extract the sequence number (everything after the date prefix)
+      if (orderId.startsWith(datePrefix)) {
+        const sequenceStr = orderId.substring(datePrefix.length);
+        const sequence = parseInt(sequenceStr, 10);
+        if (!isNaN(sequence) && sequence > maxSequence) {
+          maxSequence = sequence;
+        }
+      }
+    });
+    
+    // Increment and pad to 2 digits
+    const nextSequence = maxSequence + 1;
+    const sequenceStr = String(nextSequence).padStart(2, '0');
+    
+    return `${datePrefix}${sequenceStr}`;
+  } catch (error) {
+    console.error('Error generating order ID:', error);
+    // Fallback: use timestamp-based ID if there's an error
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const timestamp = Date.now().toString().slice(-2); // Last 2 digits of timestamp
+    return `${year}${month}${day}${timestamp}`;
   }
 }
 
@@ -301,7 +357,19 @@ async function createOrder(orderData, userId = null, customerId = null) {
   try {
     await client.query('BEGIN');
 
-    const { id, items, customerInfo, status = 'pending', total, createdAt = new Date().toISOString() } = orderData;
+    const { 
+      id, 
+      items, 
+      customerInfo, 
+      status = 'pending', 
+      total, 
+      createdAt = new Date().toISOString(),
+      paymentMethod = 'cod',
+      paymentStatus = 'pending',
+      razorpayPaymentId = null,
+      razorpayOrderId = null,
+      razorpaySignature = null
+    } = orderData;
 
     // If userId not provided, get it from the first product
     let orderUserId = userId;
@@ -335,8 +403,8 @@ async function createOrder(orderData, userId = null, customerId = null) {
 
     // Insert order
     await client.query(
-      `INSERT INTO orders (id, customer_name, customer_email, customer_phone, customer_address, status, total, created_at, user_id, customer_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO orders (id, customer_name, customer_email, customer_phone, customer_address, status, total, created_at, user_id, customer_id, payment_method, payment_status, razorpay_payment_id, razorpay_order_id, razorpay_signature)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         customerInfo.name,
@@ -347,7 +415,12 @@ async function createOrder(orderData, userId = null, customerId = null) {
         total,
         createdAt,
         orderUserId,
-        customerId // NULL for guest orders, customer ID for logged-in customers
+        customerId, // NULL for guest orders, customer ID for logged-in customers
+        paymentMethod,
+        paymentStatus,
+        razorpayPaymentId,
+        razorpayOrderId,
+        razorpaySignature
       ]
     );
 
@@ -398,7 +471,12 @@ async function createOrder(orderData, userId = null, customerId = null) {
       },
       status: orderResult.rows[0].status,
       createdAt: orderResult.rows[0].created_at.toISOString(),
-      total: parseFloat(orderResult.rows[0].total)
+      total: parseFloat(orderResult.rows[0].total),
+      paymentMethod: orderResult.rows[0].payment_method || 'cod',
+      paymentStatus: orderResult.rows[0].payment_status || 'pending',
+      razorpayPaymentId: orderResult.rows[0].razorpay_payment_id,
+      razorpayOrderId: orderResult.rows[0].razorpay_order_id,
+      razorpaySignature: orderResult.rows[0].razorpay_signature
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -406,6 +484,67 @@ async function createOrder(orderData, userId = null, customerId = null) {
     throw error;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Update order payment status and Razorpay details
+ */
+async function updateOrderPaymentStatus(orderId, paymentData) {
+  try {
+    const {
+      paymentStatus,
+      razorpayPaymentId,
+      razorpayOrderId,
+      razorpaySignature
+    } = paymentData;
+
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (paymentStatus !== undefined) {
+      fields.push(`payment_status = $${paramCount++}`);
+      values.push(paymentStatus);
+    }
+    if (razorpayPaymentId !== undefined) {
+      fields.push(`razorpay_payment_id = $${paramCount++}`);
+      values.push(razorpayPaymentId);
+    }
+    if (razorpayOrderId !== undefined) {
+      fields.push(`razorpay_order_id = $${paramCount++}`);
+      values.push(razorpayOrderId);
+    }
+    if (razorpaySignature !== undefined) {
+      fields.push(`razorpay_signature = $${paramCount++}`);
+      values.push(razorpaySignature);
+    }
+
+    if (fields.length === 0) {
+      throw new Error('No payment data provided to update');
+    }
+
+    values.push(orderId);
+
+    const result = await pool.query(
+      `UPDATE orders SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return {
+      id: result.rows[0].id,
+      paymentMethod: result.rows[0].payment_method,
+      paymentStatus: result.rows[0].payment_status,
+      razorpayPaymentId: result.rows[0].razorpay_payment_id,
+      razorpayOrderId: result.rows[0].razorpay_order_id
+    };
+  } catch (error) {
+    console.error('Error updating order payment status:', error);
+    throw error;
   }
 }
 
@@ -559,10 +698,11 @@ async function getStoreDetails(userId) {
         contactNumber2: '',
         email: '',
         address: '',
-        gstin: '',
-        upiId: '',
         instructions: '',
+        minimumOrderValue: null,
         isLive: false,
+        onlinePaymentEnabled: false,
+        razorpayKeyId: null,
         updatedAt: null
       };
     }
@@ -574,10 +714,11 @@ async function getStoreDetails(userId) {
       contactNumber2: row.contact_number_2 || '',
       email: row.email || '',
       address: row.address || '',
-      gstin: row.gstin || '',
-      upiId: row.upi_id || '',
       instructions: row.instructions || '',
+      minimumOrderValue: row.minimum_order_value !== null && row.minimum_order_value !== undefined ? parseFloat(row.minimum_order_value) : null,
       isLive: row.is_live || false,
+      onlinePaymentEnabled: row.online_payment_enabled || false,
+      razorpayKeyId: row.razorpay_key_id || null,
       updatedAt: row.updated_at ? row.updated_at.toISOString() : null
     };
   } catch (error) {
@@ -589,7 +730,7 @@ async function getStoreDetails(userId) {
 /**
  * Update store details (UPSERT - insert or update, filtered by user_id)
  */
-async function updateStoreDetails(details, userId) {
+async function updateStoreDetails(details, userId, keepExistingSecret = false) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -604,10 +745,12 @@ async function updateStoreDetails(details, userId) {
       contactNumber2 = '',
       email = '',
       address,
-      gstin = '',
-      upiId,
       instructions = '',
+      minimumOrderValue = null,
       isLive = false,
+      onlinePaymentEnabled = false,
+      razorpayKeyId = null,
+      razorpayKeySecret = null,
       updatedAt = new Date().toISOString()
     } = details;
 
@@ -621,28 +764,61 @@ async function updateStoreDetails(details, userId) {
     if (existing.rows.length === 0) {
       // Insert new record
       result = await client.query(
-        `INSERT INTO store_details (store_name, contact_number_1, contact_number_2, email, address, gstin, upi_id, instructions, updated_at, user_id, is_live)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `INSERT INTO store_details (store_name, contact_number_1, contact_number_2, email, address, instructions, minimum_order_value, updated_at, user_id, is_live, online_payment_enabled, razorpay_key_id, razorpay_key_secret)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
-        [storeName, contactNumber1, contactNumber2, email, address, gstin, upiId || '', instructions, updatedAt, userId, isLive]
+        [storeName, contactNumber1, contactNumber2, email, address, instructions, minimumOrderValue, updatedAt, userId, isLive, onlinePaymentEnabled, razorpayKeyId, razorpayKeySecret]
       );
     } else {
-      // Update existing record
+      // Update existing record - only update bank details if they are provided
+      const updateFields = [];
+      const updateValues = [];
+      let paramCount = 1;
+      
+      // Always update these fields
+      updateFields.push(`store_name = $${paramCount++}`);
+      updateValues.push(storeName);
+      updateFields.push(`contact_number_1 = $${paramCount++}`);
+      updateValues.push(contactNumber1);
+      updateFields.push(`contact_number_2 = $${paramCount++}`);
+      updateValues.push(contactNumber2);
+      updateFields.push(`email = $${paramCount++}`);
+      updateValues.push(email);
+      updateFields.push(`address = $${paramCount++}`);
+      updateValues.push(address);
+      updateFields.push(`instructions = $${paramCount++}`);
+      updateValues.push(instructions);
+      if (minimumOrderValue !== undefined && minimumOrderValue !== null) {
+        updateFields.push(`minimum_order_value = $${paramCount++}`);
+        updateValues.push(minimumOrderValue);
+      }
+      updateFields.push(`updated_at = $${paramCount++}`);
+      updateValues.push(updatedAt);
+      updateFields.push(`is_live = $${paramCount++}`);
+      updateValues.push(isLive);
+      
+      if (onlinePaymentEnabled !== undefined) {
+        updateFields.push(`online_payment_enabled = $${paramCount++}`);
+        updateValues.push(onlinePaymentEnabled);
+      }
+      if (razorpayKeyId !== undefined && razorpayKeyId !== null) {
+        updateFields.push(`razorpay_key_id = $${paramCount++}`);
+        updateValues.push(razorpayKeyId);
+      }
+      // Only update key_secret if keepExistingSecret is false and a new secret is provided
+      if (!keepExistingSecret && razorpayKeySecret !== undefined && razorpayKeySecret !== null) {
+        updateFields.push(`razorpay_key_secret = $${paramCount++}`);
+        updateValues.push(razorpayKeySecret);
+      }
+      
+      updateValues.push(userId);
+      
       result = await client.query(
         `UPDATE store_details SET
-           store_name = $1,
-           contact_number_1 = $2,
-           contact_number_2 = $3,
-           email = $4,
-           address = $5,
-           gstin = $6,
-           upi_id = $7,
-           instructions = $8,
-           updated_at = $9,
-           is_live = $10
-         WHERE user_id = $11
+           ${updateFields.join(', ')}
+         WHERE user_id = $${paramCount}
          RETURNING *`,
-        [storeName, contactNumber1, contactNumber2, email, address, gstin, upiId || '', instructions, updatedAt, isLive, userId]
+        updateValues
       );
     }
 
@@ -655,10 +831,11 @@ async function updateStoreDetails(details, userId) {
       contactNumber2: row.contact_number_2 || '',
       email: row.email || '',
       address: row.address || '',
-      gstin: row.gstin || '',
-      upiId: row.upi_id || '',
       instructions: row.instructions || '',
+      minimumOrderValue: row.minimum_order_value !== null && row.minimum_order_value !== undefined ? parseFloat(row.minimum_order_value) : null,
       isLive: row.is_live || false,
+      onlinePaymentEnabled: row.online_payment_enabled || false,
+      razorpayKeyId: row.razorpay_key_id || null,
       updatedAt: row.updated_at ? row.updated_at.toISOString() : null
     };
   } catch (error) {
@@ -865,6 +1042,72 @@ async function getCustomerById(id) {
 }
 
 /**
+ * Get all orders for a customer (filtered by store owner's user_id for admin)
+ */
+async function getCustomerOrdersForAdmin(customerId, userId) {
+  try {
+    if (!customerId) {
+      throw new Error('Customer ID is required');
+    }
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    // Get all orders for this customer that belong to this store owner
+    const ordersResult = await pool.query(
+      'SELECT * FROM orders WHERE customer_id = $1 AND user_id = $2 ORDER BY created_at DESC',
+      [customerId, userId]
+    );
+    const orders = ordersResult.rows;
+    
+    // Get all order items
+    const orderIds = orders.map(o => o.id);
+    if (orderIds.length === 0) {
+      return [];
+    }
+
+    const itemsResult = await pool.query(
+      'SELECT * FROM order_items WHERE order_id = ANY($1) ORDER BY id',
+      [orderIds]
+    );
+    const itemsByOrderId = {};
+    
+    itemsResult.rows.forEach(item => {
+      if (!itemsByOrderId[item.order_id]) {
+        itemsByOrderId[item.order_id] = [];
+      }
+      itemsByOrderId[item.order_id].push({
+        productId: item.product_id,
+        quantity: item.quantity,
+        productName: item.product_name,
+        productPrice: parseFloat(item.product_price)
+      });
+    });
+
+    // Combine orders with their items
+    return orders.map(order => ({
+      id: order.id,
+      items: itemsByOrderId[order.id] || [],
+      customerInfo: {
+        name: order.customer_name,
+        email: order.customer_email,
+        phone: order.customer_phone,
+        address: order.customer_address
+      },
+      status: order.status,
+      createdAt: order.created_at.toISOString(),
+      total: parseFloat(order.total),
+      paymentMethod: order.payment_method || 'cod',
+      paymentStatus: order.payment_status || 'pending',
+      razorpayPaymentId: order.razorpay_payment_id || null
+    }));
+  } catch (error) {
+    console.error('Error getting customer orders for admin:', error);
+    throw error;
+  }
+}
+
+/**
  * Get all orders for a customer
  */
 async function getCustomerOrders(customerId) {
@@ -916,7 +1159,10 @@ async function getCustomerOrders(customerId) {
       },
       status: order.status,
       createdAt: order.created_at.toISOString(),
-      total: parseFloat(order.total)
+      total: parseFloat(order.total),
+      paymentMethod: order.payment_method || 'cod',
+      paymentStatus: order.payment_status || 'paid',
+      razorpayPaymentId: order.razorpay_payment_id || null
     }));
   } catch (error) {
     console.error('Error getting customer orders:', error);
@@ -945,6 +1191,7 @@ async function getAllCustomers() {
 }
 
 module.exports = {
+  generateOrderId,
   // Product functions
   getAllProducts,
   getProductById,
@@ -957,6 +1204,7 @@ module.exports = {
   getAllOrders,
   createOrder,
   updateOrderStatus,
+  updateOrderPaymentStatus,
   
   // Store details functions
   getStoreDetails,
@@ -979,6 +1227,7 @@ module.exports = {
   getCustomerByPhone,
   getCustomerById,
   getCustomerOrders,
+  getCustomerOrdersForAdmin,
   getAllCustomers
 };
 

@@ -48,6 +48,7 @@
         <div class="cart-items" id="cart-items">
             <p class="empty-cart">Your cart is empty</p>
         </div>
+        <div id="cart-minimum-message" style="display: none; background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 15px; margin: 10px; border-radius: 4px; color: #856404 !important; font-size: 0.9em; line-height: 1.5; min-height: 50px; font-weight: 500;"></div>
         <div class="cart-footer">
             <div class="cart-total">
                 <strong>Total: ₹<span id="cart-total">0.00</span></strong>
@@ -72,9 +73,20 @@
         <div class="modal-content">
             <span class="close" onclick="closeCheckoutModal()">&times;</span>
             <h2>Checkout</h2>
-            <!-- UPI ID is disabled, payment info section is hidden -->
-            <div id="payment-info" style="display: none;">
-                <p id="payment-instructions-display" style="margin: 5px 0; color: #666;"></p>
+            <div id="minimum-order-message" style="display: none; background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 20px; border-radius: 4px; color: #856404 !important; font-size: 0.95em; line-height: 1.5; font-weight: 500; min-height: 50px;"></div>
+            <!-- Payment Method Selection -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label style="font-weight: 600; margin-bottom: 10px; display: block;">Payment Method:</label>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px; transition: all 0.3s;">
+                        <input type="radio" name="payment-method" value="cod" checked style="margin-right: 10px;">
+                        <span>Cash on Delivery (COD)</span>
+                    </label>
+                    <label id="online-payment-option" style="display: none; align-items: center; cursor: pointer; padding: 10px; border: 2px solid #e0e0e0; border-radius: 5px; transition: all 0.3s;">
+                        <input type="radio" name="payment-method" value="online" style="margin-right: 10px;">
+                        <span>Online Payment</span>
+                    </label>
+                </div>
             </div>
             <form id="checkout-form" onsubmit="submitOrder(event)">
                 <div class="form-group">
@@ -98,6 +110,7 @@
         </div>
     </div>
 
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <script src="store.js"></script>
     <script>
         // Hide navigation when viewed in iframe (preview mode)

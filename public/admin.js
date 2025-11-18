@@ -774,6 +774,8 @@ function displayOrders() {
     if (orders.length === 0) {
         container.innerHTML = '<p class="loading">No orders yet</p>';
         if (countElement) countElement.textContent = '';
+        const totalElement = document.getElementById('orders-total');
+        if (totalElement) totalElement.style.display = 'none';
         return;
     }
     
@@ -789,6 +791,21 @@ function displayOrders() {
             countElement.textContent = `Showing ${filteredCount} of ${totalCount} orders`;
         } else {
             countElement.textContent = `Total: ${totalCount} order${totalCount !== 1 ? 's' : ''}`;
+        }
+    }
+    
+    // Calculate and display total order value
+    const totalElement = document.getElementById('orders-total');
+    const totalAmountElement = document.getElementById('orders-total-amount');
+    if (totalElement && totalAmountElement) {
+        if (ordersToDisplay.length > 0) {
+            const totalValue = ordersToDisplay.reduce((sum, order) => {
+                return sum + (parseFloat(order.total) || 0);
+            }, 0);
+            totalAmountElement.textContent = `₹${totalValue.toFixed(2)}`;
+            totalElement.style.display = 'flex';
+        } else {
+            totalElement.style.display = 'none';
         }
     }
     
@@ -833,6 +850,16 @@ function displayOrders() {
             </div>
             <div class="order-total">Total: ₹${order.total.toFixed(2)}</div>
             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <strong>Payment:</strong>
+                    ${order.paymentMethod === 'online' 
+                        ? `<span style="background: ${order.paymentStatus === 'paid' ? '#28a745' : order.paymentStatus === 'failed' ? '#dc3545' : '#ffc107'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">
+                            ${order.paymentStatus === 'paid' ? 'Paid' : order.paymentStatus === 'failed' ? 'Payment Failed' : 'Payment Pending'}
+                        </span>`
+                        : `<span style="background: #6c757d; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">COD</span>`
+                    }
+                    ${order.razorpayPaymentId ? `<span style="color: #666; font-size: 0.85em;">Payment ID: ${order.razorpayPaymentId}</span>` : ''}
+                </div>
                 <p><strong>Customer:</strong> ${order.customerInfo.name || 'N/A'}</p>
                 <p><strong>Email:</strong> ${order.customerInfo.email || 'N/A'}</p>
                 <p><strong>Phone:</strong> ${order.customerInfo.phone || 'N/A'}</p>
@@ -888,9 +915,8 @@ async function loadPaymentSettings() {
         document.getElementById('contact-number-2').value = storeDetails.contactNumber2 || '';
         document.getElementById('store-email').value = storeDetails.email || '';
         document.getElementById('address').value = storeDetails.address || '';
-        document.getElementById('gstin').value = storeDetails.gstin || '';
-        document.getElementById('upi-id').value = storeDetails.upiId || '';
         document.getElementById('payment-instructions').value = storeDetails.instructions || '';
+        document.getElementById('minimum-order-value').value = storeDetails.minimumOrderValue || '';
         
         // Update toggle switch and status text
         const toggle = document.getElementById('store-live-toggle');
@@ -907,8 +933,330 @@ async function loadPaymentSettings() {
         if (storeDetails.storeName) {
             goLive();
         }
+        
+        // Load Razorpay payment settings
+        await loadRazorpaySettings(storeDetails);
     } catch (error) {
         console.error('Error loading store details:', error);
+    }
+}
+
+// Store original key secret for edit mode
+let originalKeySecret = null;
+let isKeysEditMode = false;
+
+async function loadRazorpaySettings(storeDetails) {
+    try {
+        const toggle = document.getElementById('online-payment-toggle');
+        const message = document.getElementById('payment-toggle-message');
+        const keysSection = document.getElementById('razorpay-keys-section');
+        const keyIdInput = document.getElementById('razorpay-key-id');
+        const keySecretInput = document.getElementById('razorpay-key-secret');
+        const editBtn = document.getElementById('edit-keys-btn');
+        const saveBtn = document.getElementById('save-keys-btn');
+        
+        if (!toggle || !message || !keysSection) return;
+        
+        // Always populate key fields from database if they exist, regardless of online payment status
+        // This ensures keys are preserved even when online payment is disabled
+        if (storeDetails.razorpayKeyId) {
+            if (keyIdInput) {
+                keyIdInput.value = storeDetails.razorpayKeyId;
+            }
+            // Show masked secret if keys exist
+            if (keySecretInput) {
+                keySecretInput.value = '••••••••••••••••';
+                originalKeySecret = '••••••••••••••••'; // Placeholder to indicate secret exists
+            }
+        } else {
+            // Only clear if keys don't exist in database
+            if (keyIdInput) keyIdInput.value = '';
+            if (keySecretInput) keySecretInput.value = '';
+            originalKeySecret = null;
+        }
+        
+        // Check if online payment is enabled
+        if (storeDetails.onlinePaymentEnabled && storeDetails.razorpayKeyId) {
+            toggle.checked = true;
+            message.textContent = 'Online payment is enabled';
+            message.style.color = '#28a745';
+            keysSection.style.display = 'block';
+            
+            // Set to view mode
+            setKeysViewMode();
+        } else {
+            toggle.checked = false;
+            message.textContent = 'COD is selected by default';
+            message.style.color = '#666';
+            keysSection.style.display = 'none';
+            
+            // Set to view mode if keys exist (so they're ready when user enables toggle)
+            if (storeDetails.razorpayKeyId) {
+                setKeysViewMode();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading Razorpay settings:', error);
+    }
+}
+
+function setKeysViewMode() {
+    const keyIdInput = document.getElementById('razorpay-key-id');
+    const keySecretInput = document.getElementById('razorpay-key-secret');
+    const editBtn = document.getElementById('edit-keys-btn');
+    const saveBtn = document.getElementById('save-keys-btn');
+    
+    if (keyIdInput) keyIdInput.readOnly = true;
+    if (keySecretInput) keySecretInput.readOnly = true;
+    if (editBtn) editBtn.style.display = 'block';
+    if (saveBtn) saveBtn.style.display = 'none';
+    isKeysEditMode = false;
+}
+
+function setKeysEditMode() {
+    const keyIdInput = document.getElementById('razorpay-key-id');
+    const keySecretInput = document.getElementById('razorpay-key-secret');
+    const editBtn = document.getElementById('edit-keys-btn');
+    const saveBtn = document.getElementById('save-keys-btn');
+    
+    if (keyIdInput) keyIdInput.readOnly = false;
+    if (keySecretInput) {
+        keySecretInput.readOnly = false;
+        // Clear the masked value when entering edit mode
+        if (keySecretInput.value === '••••••••••••••••') {
+            keySecretInput.value = '';
+        }
+    }
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'block';
+    isKeysEditMode = true;
+}
+
+async function toggleKeysEdit() {
+    if (isKeysEditMode) {
+        // Cancel edit - restore original values
+        const keyIdInput = document.getElementById('razorpay-key-id');
+        const keySecretInput = document.getElementById('razorpay-key-secret');
+        
+        // Reload from store details
+        await loadPaymentSettings();
+        setKeysViewMode();
+    } else {
+        setKeysEditMode();
+    }
+}
+
+async function handlePaymentToggle() {
+    const toggle = document.getElementById('online-payment-toggle');
+    const keysSection = document.getElementById('razorpay-keys-section');
+    const message = document.getElementById('payment-toggle-message');
+    const keyIdInput = document.getElementById('razorpay-key-id');
+    
+    if (toggle.checked) {
+        // Check if keys are already saved (either in input field or need to reload from database)
+        let hasKeys = keyIdInput && keyIdInput.value && keyIdInput.value.trim() !== '' && keyIdInput.value !== '••••••••••••••••';
+        
+        // If keys not found in input, try to reload from database
+        if (!hasKeys) {
+            try {
+                const response = await fetch(`${API_BASE}/payment`, {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const storeDetails = await response.json();
+                    if (storeDetails.razorpayKeyId) {
+                        // Keys exist in database, populate the fields
+                        if (keyIdInput) {
+                            keyIdInput.value = storeDetails.razorpayKeyId;
+                        }
+                        const keySecretInput = document.getElementById('razorpay-key-secret');
+                        if (keySecretInput) {
+                            keySecretInput.value = '••••••••••••••••';
+                            originalKeySecret = '••••••••••••••••';
+                        }
+                        hasKeys = true;
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking for existing keys:', error);
+            }
+        }
+        
+        if (!hasKeys) {
+            // Prevent enabling without keys - uncheck the toggle
+            toggle.checked = false;
+            alert('Please save Razorpay API keys first before enabling online payment.');
+            
+            // Show Razorpay keys section for entering keys
+            if (keysSection) {
+                keysSection.style.display = 'block';
+            }
+            message.textContent = 'Please enter and save your Razorpay API keys below to enable online payment';
+            message.style.color = '#ffc107';
+            
+            // Set to edit mode for new keys
+            setKeysEditMode();
+        } else {
+            // Keys already exist, just show the section
+            if (keysSection) {
+                keysSection.style.display = 'block';
+            }
+            message.textContent = 'Online payment is enabled';
+            message.style.color = '#28a745';
+            
+            // Set to view mode if not already in edit mode
+            if (!isKeysEditMode) {
+                setKeysViewMode();
+            }
+            
+            // Save the enabled state to database
+            await updateOnlinePaymentStatus(true);
+        }
+    } else {
+        // Hide Razorpay keys section
+        if (keysSection) {
+            keysSection.style.display = 'none';
+        }
+        message.textContent = 'COD is selected by default';
+        message.style.color = '#666';
+        
+        // Save the disabled state to database
+        await updateOnlinePaymentStatus(false);
+    }
+}
+
+async function updateOnlinePaymentStatus(enabled) {
+    try {
+        const response = await fetch(`${API_BASE}/payment/online-payment-status`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                onlinePaymentEnabled: enabled
+            })
+        });
+        
+        if (response.status === 401) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            console.error('Error updating online payment status:', result.error);
+            // Revert toggle on error
+            const toggle = document.getElementById('online-payment-toggle');
+            if (toggle) {
+                toggle.checked = !enabled;
+            }
+            alert('Error updating online payment status. Please try again.');
+        }
+    } catch (error) {
+        console.error('Error updating online payment status:', error);
+        // Revert toggle on error
+        const toggle = document.getElementById('online-payment-toggle');
+        if (toggle) {
+            toggle.checked = !enabled;
+        }
+        alert('Error updating online payment status. Please try again.');
+    }
+}
+
+async function saveRazorpayKeys() {
+    const keyId = document.getElementById('razorpay-key-id').value.trim();
+    const keySecretInput = document.getElementById('razorpay-key-secret');
+    const keySecret = keySecretInput ? keySecretInput.value.trim() : '';
+    const toggle = document.getElementById('online-payment-toggle');
+    
+    if (!toggle.checked) {
+        alert('Please enable online payment first by toggling the switch.');
+        return;
+    }
+    
+    if (!keyId) {
+        alert('Please enter Razorpay Key ID.');
+        return;
+    }
+    
+    // If secret is masked or empty, we'll send a flag to keep existing secret
+    const isSecretMasked = keySecret === '••••••••••••••••' || keySecret === '';
+    const needsNewSecret = !isSecretMasked;
+    
+    if (!needsNewSecret && originalKeySecret !== '••••••••••••••••') {
+        alert('Please enter Razorpay Key Secret.');
+        return;
+    }
+    
+    // Validate key_id format
+    if (!keyId.startsWith('rzp_live_') && !keyId.startsWith('rzp_test_')) {
+        if (!confirm('Key ID should start with "rzp_live_" or "rzp_test_". Do you want to continue anyway?')) {
+            return;
+        }
+    }
+    
+    try {
+        const requestBody = {
+            razorpayKeyId: keyId,
+            onlinePaymentEnabled: true
+        };
+        
+        // Only include key_secret if user provided a new one
+        if (needsNewSecret) {
+            requestBody.razorpayKeySecret = keySecret;
+        } else {
+            // Send flag to keep existing secret
+            requestBody.keepExistingSecret = true;
+        }
+        
+        const response = await fetch(`${API_BASE}/payment/razorpay-keys`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (response.status === 401) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            alert('Razorpay keys saved successfully! Online payment is now enabled.');
+            
+            // Enable the toggle
+            if (toggle) {
+                toggle.checked = true;
+            }
+            
+            // Update UI
+            const message = document.getElementById('payment-toggle-message');
+            message.textContent = 'Online payment is enabled';
+            message.style.color = '#28a745';
+            
+            // Show masked secret
+            if (keySecretInput) {
+                keySecretInput.value = '••••••••••••••••';
+                originalKeySecret = '••••••••••••••••';
+            }
+            
+            // Set to view mode
+            setKeysViewMode();
+            
+            // Reload store details to refresh UI
+            await loadPaymentSettings();
+        } else {
+            alert('Error saving Razorpay keys: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error saving Razorpay keys:', error);
+        alert('Error saving Razorpay keys: ' + (error.message || 'Please check the console for details.'));
     }
 }
 
@@ -920,9 +1268,8 @@ async function savePaymentSettings(event) {
     const contactNumber2 = document.getElementById('contact-number-2').value.trim();
     const email = document.getElementById('store-email').value.trim();
     const address = document.getElementById('address').value.trim();
-    const gstin = document.getElementById('gstin').value.trim();
-    const upiId = document.getElementById('upi-id').value.trim();
     const instructions = document.getElementById('payment-instructions').value.trim();
+    const minimumOrderValue = document.getElementById('minimum-order-value').value.trim();
     const statusDiv = document.getElementById('payment-status');
     
     if (!storeName) {
@@ -959,9 +1306,8 @@ async function savePaymentSettings(event) {
                 contactNumber2, 
                 email, 
                 address, 
-                gstin, 
-                upiId, 
-                instructions 
+                instructions,
+                minimumOrderValue: minimumOrderValue ? parseFloat(minimumOrderValue) : null
             })
         });
         
@@ -1186,7 +1532,7 @@ function displayCustomers() {
     if (!tbody) return;
     
     if (filteredCustomers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="loading">No customers found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="loading">No customers found</td></tr>';
         if (countSpan) countSpan.textContent = '0 customers';
         return;
     }
@@ -1204,6 +1550,13 @@ function displayCustomers() {
                 <td>${customer.name || 'N/A'}</td>
                 <td>${customer.phone || 'N/A'}</td>
                 <td>${formattedDate}</td>
+                <td>
+                    <button onclick="viewCustomerOrders(${customer.id}, '${(customer.name || 'Customer').replace(/'/g, "\\'")}')" 
+                            style="background: #667eea; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 1.1em;" 
+                            title="View Orders">
+                        👁️
+                    </button>
+                </td>
             </tr>
         `;
     }).join('');
@@ -1228,4 +1581,222 @@ function filterCustomers() {
     
     displayCustomers();
 }
+
+// Customer Orders Modal Functions
+let currentCustomerOrders = [];
+let filteredCustomerOrders = [];
+let currentCustomerId = null;
+let customerOrderFilters = {
+    orderId: '',
+    dateFrom: '',
+    dateTo: ''
+};
+
+async function viewCustomerOrders(customerId, customerName) {
+    currentCustomerId = customerId;
+    const modal = document.getElementById('customer-orders-modal');
+    const title = document.getElementById('customer-orders-title');
+    const container = document.getElementById('customer-orders-container');
+    
+    if (title) {
+        title.textContent = `Orders - ${customerName}`;
+    }
+    
+    if (container) {
+        container.innerHTML = '<p class="loading">Loading orders...</p>';
+    }
+    
+    // Clear filters
+    document.getElementById('filter-customer-order-id').value = '';
+    document.getElementById('filter-customer-date-from').value = '';
+    document.getElementById('filter-customer-date-to').value = '';
+    customerOrderFilters = { orderId: '', dateFrom: '', dateTo: '' };
+    
+    // Show modal
+    if (modal) {
+        modal.style.display = 'block';
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/admin/customers/${customerId}/orders`, {
+            credentials: 'include'
+        });
+        
+        if (response.status === 401) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Failed to load orders' }));
+            throw new Error(errorData.error || 'Failed to load customer orders');
+        }
+        
+        currentCustomerOrders = await response.json();
+        filteredCustomerOrders = currentCustomerOrders;
+        displayCustomerOrders();
+    } catch (error) {
+        console.error('Error loading customer orders:', error);
+        if (container) {
+            container.innerHTML = `<p class="loading" style="color: red;">Error loading orders: ${error.message}</p>`;
+        }
+    }
+}
+
+function displayCustomerOrders() {
+    const container = document.getElementById('customer-orders-container');
+    const countSpan = document.getElementById('customer-orders-count');
+    const totalSpan = document.getElementById('customer-orders-total');
+    
+    if (!container) return;
+    
+    if (filteredCustomerOrders.length === 0) {
+        container.innerHTML = '<p class="loading">No orders found for this customer.</p>';
+        if (countSpan) countSpan.textContent = '0 orders';
+        if (totalSpan) totalSpan.textContent = '₹0.00';
+        return;
+    }
+    
+    // Calculate total
+    const totalValue = filteredCustomerOrders.reduce((sum, order) => {
+        return sum + (parseFloat(order.total) || 0);
+    }, 0);
+    
+    // Update summary
+    if (countSpan) {
+        const totalCount = currentCustomerOrders.length;
+        const filteredCount = filteredCustomerOrders.length;
+        if (filteredCount < totalCount) {
+            countSpan.textContent = `Showing ${filteredCount} of ${totalCount} orders`;
+        } else {
+            countSpan.textContent = `${totalCount} order${totalCount !== 1 ? 's' : ''}`;
+        }
+    }
+    if (totalSpan) {
+        totalSpan.textContent = `₹${totalValue.toFixed(2)}`;
+    }
+    
+    // Display orders
+    container.innerHTML = filteredCustomerOrders.map(order => {
+        const date = new Date(order.createdAt);
+        const formattedDate = date.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        const statusClass = `status-${order.status}`;
+        const statusText = order.status.charAt(0).toUpperCase() + order.status.slice(1);
+        
+        const itemsHtml = order.items.map(item => `
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                <span>${item.productName} × ${item.quantity}</span>
+                <span>₹${(item.productPrice * item.quantity).toFixed(2)}</span>
+            </div>
+        `).join('');
+        
+        // Payment status display
+        const paymentStatusHtml = order.paymentMethod === 'online' 
+            ? `<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                    <strong style="color: #666;">Payment:</strong>
+                    <span style="background: ${order.paymentStatus === 'paid' ? '#28a745' : order.paymentStatus === 'failed' ? '#dc3545' : '#ffc107'}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">
+                        ${order.paymentStatus === 'paid' ? 'Paid Online' : order.paymentStatus === 'failed' ? 'Payment Failed' : 'Payment Pending'}
+                    </span>
+                </div>
+                ${order.razorpayPaymentId ? `<div style="color: #666; font-size: 0.85em; margin-top: 5px;">Payment ID: ${order.razorpayPaymentId}</div>` : ''}
+            </div>`
+            : `<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <strong style="color: #666;">Payment:</strong>
+                    <span style="background: #6c757d; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">COD</span>
+                </div>
+            </div>`;
+        
+        return `
+            <div class="order-card" style="margin-bottom: 20px;">
+                <div class="order-header">
+                    <div>
+                        <strong>Order #${order.id}</strong>
+                        <p style="color: #666; font-size: 0.9em; margin-top: 5px;">${formattedDate}</p>
+                    </div>
+                    <span class="order-status ${statusClass}">${statusText}</span>
+                </div>
+                <div class="order-items">
+                    ${itemsHtml}
+                </div>
+                <div class="order-total">Total: ₹${order.total.toFixed(2)}</div>
+                ${paymentStatusHtml}
+            </div>
+        `;
+    }).join('');
+}
+
+function filterCustomerOrders() {
+    const orderIdFilter = document.getElementById('filter-customer-order-id')?.value.toLowerCase().trim() || '';
+    const dateFromFilter = document.getElementById('filter-customer-date-from')?.value || '';
+    const dateToFilter = document.getElementById('filter-customer-date-to')?.value || '';
+    
+    customerOrderFilters.orderId = orderIdFilter;
+    customerOrderFilters.dateFrom = dateFromFilter;
+    customerOrderFilters.dateTo = dateToFilter;
+    
+    // Filter orders
+    filteredCustomerOrders = currentCustomerOrders.filter(order => {
+        // Order ID filter (check both formatted ID and original ID)
+        if (orderIdFilter) {
+            const orderIdStr = String(order.id).toLowerCase();
+            if (!orderIdStr.includes(orderIdFilter)) {
+                return false;
+            }
+        }
+        
+        // Date filters
+        if (dateFromFilter || dateToFilter) {
+            const orderDate = new Date(order.createdAt);
+            orderDate.setHours(0, 0, 0, 0);
+            
+            if (dateFromFilter) {
+                const fromDate = new Date(dateFromFilter);
+                fromDate.setHours(0, 0, 0, 0);
+                if (orderDate < fromDate) {
+                    return false;
+                }
+            }
+            
+            if (dateToFilter) {
+                const toDate = new Date(dateToFilter);
+                toDate.setHours(23, 59, 59, 999);
+                if (orderDate > toDate) {
+                    return false;
+                }
+            }
+        }
+        
+        return true;
+    });
+    
+    displayCustomerOrders();
+}
+
+function clearCustomerOrderFilters() {
+    document.getElementById('filter-customer-order-id').value = '';
+    document.getElementById('filter-customer-date-from').value = '';
+    document.getElementById('filter-customer-date-to').value = '';
+    customerOrderFilters = { orderId: '', dateFrom: '', dateTo: '' };
+    filterCustomerOrders();
+}
+
+function closeCustomerOrdersModal() {
+    const modal = document.getElementById('customer-orders-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    currentCustomerOrders = [];
+    filteredCustomerOrders = [];
+    currentCustomerId = null;
+}
+
 

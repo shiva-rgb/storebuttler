@@ -90,6 +90,23 @@
             padding: 40px;
             color: #666;
         }
+        #refresh-btn:hover {
+            background: #5568d3;
+        }
+        #refresh-btn:active {
+            transform: scale(0.98);
+        }
+        #refresh-btn.loading {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        #refresh-icon.spinning {
+            animation: spin 1s linear infinite;
+        }
     </style>
 </head>
 <body>
@@ -104,7 +121,13 @@
     </header>
 
     <main class="container">
-        <h2 style="margin-bottom: 30px;">Order History</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h2 style="margin: 0;">Order History</h2>
+            <button id="refresh-btn" onclick="refreshOrders()" style="background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: background 0.3s;">
+                <span id="refresh-icon">🔄</span>
+                <span>Refresh</span>
+            </button>
+        </div>
         <div id="orders-container">
             <p class="loading">Loading orders...</p>
         </div>

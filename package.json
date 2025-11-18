@@ -7,24 +7,28 @@
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["supermarket", "inventory", "ecommerce"],
+  "keywords": [
+    "supermarket",
+    "inventory",
+    "ecommerce"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
-    "multer": "^1.4.5-lts.1",
-    "xlsx": "^0.18.5",
-    "csv-parser": "^3.0.0",
-    "cors": "^2.8.5",
-    "body-parser": "^1.20.2",
-    "pg": "^8.11.3",
-    "dotenv": "^16.3.1",
-    "jsonwebtoken": "^9.0.2",
     "bcrypt": "^5.1.1",
-    "cookie-parser": "^1.4.6"
+    "body-parser": "^1.20.2",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.0.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.3",
+    "razorpay": "^2.9.6",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   }
 }
-

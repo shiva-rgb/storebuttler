@@ -349,6 +349,39 @@ function updateCartUI() {
         
         if (cartTotal) cartTotal.textContent = total.toFixed(2);
         if (checkoutBtn) checkoutBtn.disabled = availableItems.length === 0;
+        
+        // Check and display minimum order value message
+        const cartMinimumMessage = document.getElementById('cart-minimum-message');
+        console.log('[CART] Checking minimum order value:', {
+            paymentSettings: paymentSettings,
+            minimumOrderValue: paymentSettings?.minimumOrderValue,
+            total: total,
+            cartMinimumMessage: cartMinimumMessage
+        });
+        
+        if (paymentSettings && paymentSettings.minimumOrderValue && paymentSettings.minimumOrderValue > 0) {
+            if (total < paymentSettings.minimumOrderValue) {
+                const remaining = (paymentSettings.minimumOrderValue - total).toFixed(2);
+                if (cartMinimumMessage) {
+                    cartMinimumMessage.style.display = 'block';
+                    cartMinimumMessage.style.visibility = 'visible';
+                    cartMinimumMessage.style.opacity = '1';
+                    cartMinimumMessage.innerHTML = `<div style="color: #856404; font-weight: 600; margin-bottom: 5px;">⚠️ Minimum order value: ₹${paymentSettings.minimumOrderValue.toFixed(2)}</div><div style="color: #856404;">Add ₹${remaining} more to checkout.</div>`;
+                    console.log('[CART] Showing minimum order message:', cartMinimumMessage.innerHTML);
+                } else {
+                    console.log('[CART] cart-minimum-message element not found');
+                }
+            } else {
+                if (cartMinimumMessage) {
+                    cartMinimumMessage.style.display = 'none';
+                }
+            }
+        } else {
+            if (cartMinimumMessage) {
+                cartMinimumMessage.style.display = 'none';
+            }
+            console.log('[CART] No minimum order value set or value is 0/null');
+        }
     }
     
     updateCartCount();
@@ -421,6 +454,9 @@ async function loadStoreDetails(storeSlug = 'guest') {
         }
         paymentSettings = await response.json();
         
+        console.log('[STORE] Loaded payment settings:', paymentSettings);
+        console.log('[STORE] Minimum order value:', paymentSettings.minimumOrderValue);
+        
         // Check if store is live
         if (!paymentSettings.isLive) {
             showMaintenanceMessage();
@@ -433,32 +469,103 @@ async function loadStoreDetails(storeSlug = 'guest') {
         // Update store name in navigation header
         updateStoreHeader();
         
-        // Update payment info in checkout modal
-        // UPI ID is disabled, so hide payment info section
-        const paymentInfo = document.getElementById('payment-info');
-        if (paymentInfo) {
-            paymentInfo.style.display = 'none';
-        }
-        
-        // Show instructions if available
-        if (paymentSettings && paymentSettings.instructions) {
-            const instructionsDisplay = document.getElementById('payment-instructions-display');
-            if (instructionsDisplay) {
-                instructionsDisplay.textContent = paymentSettings.instructions;
-                instructionsDisplay.style.display = 'block';
+        // Show/hide online payment option based on store settings
+        const onlinePaymentOption = document.getElementById('online-payment-option');
+        if (onlinePaymentOption) {
+            if (paymentSettings && paymentSettings.onlinePaymentEnabled) {
+                onlinePaymentOption.style.display = 'flex';
+                const onlineRadio = onlinePaymentOption.querySelector('input[name="payment-method"][value="online"]');
+                if (onlineRadio) {
+                    onlineRadio.disabled = false;
+                }
+            } else {
+                onlinePaymentOption.style.display = 'none';
+                const codRadio = document.querySelector('input[name="payment-method"][value="cod"]');
+                if (codRadio) {
+                    codRadio.checked = true;
+                }
             }
         }
+        
+        // Update cart UI to show minimum order value message if needed
+        updateCartUI();
+        
     } catch (error) {
         console.error('Error loading store details:', error);
     }
 }
 
-function checkout() {
+async function checkout() {
     if (cart.length === 0) return;
-    document.getElementById('checkout-modal').style.display = 'block';
+    
+    // Calculate cart total
+    const availableItems = cart.filter(item => !item.outOfStock);
+    const cartTotal = availableItems.reduce((sum, item) => {
+        const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
+        const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
+        return sum + (price * quantity);
+    }, 0);
+    
     // Reload store details in case it was updated
     const storeSlug = getStoreSlug();
-    loadStoreDetails(storeSlug);
+    await loadStoreDetails(storeSlug);
+    
+    // Check minimum order value
+    const minimumOrderMessage = document.getElementById('minimum-order-message');
+    const checkoutForm = document.getElementById('checkout-form');
+    const submitBtn = checkoutForm ? checkoutForm.querySelector('button[type="submit"]') : null;
+    
+    console.log('[CHECKOUT] Checking minimum order value:', {
+        paymentSettings: paymentSettings,
+        minimumOrderValue: paymentSettings?.minimumOrderValue,
+        cartTotal: cartTotal,
+        minimumOrderMessage: minimumOrderMessage,
+        submitBtn: submitBtn
+    });
+    
+    if (paymentSettings && paymentSettings.minimumOrderValue && paymentSettings.minimumOrderValue > 0) {
+        if (cartTotal < paymentSettings.minimumOrderValue) {
+            const remaining = (paymentSettings.minimumOrderValue - cartTotal).toFixed(2);
+            console.log('[CHECKOUT] Cart total below minimum. Showing message.');
+            if (minimumOrderMessage) {
+                minimumOrderMessage.style.display = 'block';
+                minimumOrderMessage.style.visibility = 'visible';
+                minimumOrderMessage.style.opacity = '1';
+                minimumOrderMessage.innerHTML = `<div style="color: #856404; font-weight: 600; margin-bottom: 8px; font-size: 1em;">⚠️ Minimum Order Value Required</div><div style="color: #856404; font-size: 0.95em;">Your cart total is ₹${cartTotal.toFixed(2)}. Please add items worth ₹${remaining} more to proceed with checkout.</div>`;
+                console.log('[CHECKOUT] Minimum order message displayed:', minimumOrderMessage.innerHTML);
+                console.log('[CHECKOUT] Message element computed style:', window.getComputedStyle(minimumOrderMessage));
+            } else {
+                console.error('[CHECKOUT] minimum-order-message element not found!');
+            }
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = `Minimum cart value above ₹${paymentSettings.minimumOrderValue.toFixed(2)}`;
+                console.log('[CHECKOUT] Submit button disabled and text updated');
+            } else {
+                console.error('[CHECKOUT] Submit button not found!');
+            }
+        } else {
+            console.log('[CHECKOUT] Cart total meets minimum requirement');
+            if (minimumOrderMessage) {
+                minimumOrderMessage.style.display = 'none';
+            }
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Place Order';
+            }
+        }
+    } else {
+        console.log('[CHECKOUT] No minimum order value set');
+        if (minimumOrderMessage) {
+            minimumOrderMessage.style.display = 'none';
+        }
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Place Order';
+        }
+    }
+    
+    document.getElementById('checkout-modal').style.display = 'block';
     
     // Pre-fill customer info if logged in
     if (currentCustomer) {
@@ -480,6 +587,18 @@ async function submitOrder(event) {
     event.preventDefault();
     
     const formData = new FormData(event.target);
+    
+    // Check which payment method is selected
+    const codRadio = document.querySelector('input[name="payment-method"][value="cod"]');
+    const onlineRadio = document.querySelector('input[name="payment-method"][value="online"]');
+    
+    let paymentMethod = 'cod';
+    if (onlineRadio && onlineRadio.checked) {
+        paymentMethod = 'online';
+    } else if (codRadio && codRadio.checked) {
+        paymentMethod = 'cod';
+    }
+    
     const customerInfo = {
         name: formData.get('name'),
         email: formData.get('email'),
@@ -495,6 +614,22 @@ async function submitOrder(event) {
         return;
     }
     
+    // Calculate total
+    const total = availableItems.reduce((sum, item) => {
+        const price = typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0;
+        const quantity = typeof item.quantity === 'number' ? item.quantity : parseInt(item.quantity) || 0;
+        return sum + (price * quantity);
+    }, 0);
+    
+    // Check minimum order value
+    if (paymentSettings && paymentSettings.minimumOrderValue && paymentSettings.minimumOrderValue > 0) {
+        if (total < paymentSettings.minimumOrderValue) {
+            const remaining = (paymentSettings.minimumOrderValue - total).toFixed(2);
+            alert(`Minimum order value is ₹${paymentSettings.minimumOrderValue.toFixed(2)}. Your cart total is ₹${total.toFixed(2)}. Please add items worth ₹${remaining} more to proceed.`);
+            return;
+        }
+    }
+    
     const orderItems = availableItems.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -504,42 +639,206 @@ async function submitOrder(event) {
     // Get store slug for order creation
     const storeSlug = getStoreSlug();
     
-    try {
-        const response = await fetch(`${API_BASE}/orders`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                items: orderItems,
-                customerInfo: customerInfo,
-                storeSlug: storeSlug
-            })
-        });
-        
-        if (response.status === 503) {
-            const data = await response.json();
-            alert(data.error || 'Store is currently under maintenance. Please try again later.');
-            return;
+    if (paymentMethod === 'cod') {
+        // Create COD order
+        try {
+            const response = await fetch(`${API_BASE}/orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    items: orderItems,
+                    customerInfo: customerInfo,
+                    storeSlug: storeSlug,
+                    paymentMethod: 'cod',
+                    paymentStatus: 'paid' // COD is considered paid
+                })
+            });
+            
+            if (response.status === 503) {
+                const data = await response.json();
+                alert(data.error || 'Store is currently under maintenance. Please try again later.');
+                return;
+            }
+            
+            if (response.ok) {
+                const result = await response.json();
+                alert('Order placed successfully! Order ID: ' + result.order.id);
+                // Remove only available items from cart (keep out-of-stock items for reference)
+                cart = cart.filter(item => item.outOfStock);
+                saveCart();
+                updateCartUI();
+                closeCheckoutModal();
+                loadProducts(storeSlug); // Refresh inventory
+            } else {
+                const error = await response.json();
+                alert('Error: ' + error.error);
+            }
+        } catch (error) {
+            console.error('Error placing order:', error);
+            alert('Error placing order. Please try again.');
         }
-        
-        if (response.ok) {
-            const result = await response.json();
-            alert('Order placed successfully! Order ID: ' + result.order.id);
-            // Remove only available items from cart (keep out-of-stock items for reference)
-            cart = cart.filter(item => item.outOfStock);
-            saveCart();
-            updateCartUI();
-            closeCheckoutModal();
-            const storeSlug = getStoreSlug();
-            loadProducts(storeSlug); // Refresh inventory
-        } else {
-            const error = await response.json();
-            alert('Error: ' + error.error);
+    } else {
+        // Online payment - create Razorpay order first
+        try {
+            // Create Razorpay order
+            const razorpayResponse = await fetch(`${API_BASE}/razorpay/create-order`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    amount: total,
+                    currency: 'INR',
+                    receipt: `receipt_${Date.now()}`,
+                    notes: {
+                        store_slug: storeSlug
+                    },
+                    storeSlug: storeSlug
+                })
+            });
+            
+            if (!razorpayResponse.ok) {
+                const errorData = await razorpayResponse.json();
+                throw new Error(errorData.error || 'Failed to create payment order');
+            }
+            
+            const razorpayData = await razorpayResponse.json();
+            const razorpayOrderId = razorpayData.order.id;
+            
+            // Check if Razorpay is loaded
+            if (typeof Razorpay === 'undefined') {
+                throw new Error('Razorpay payment gateway is not loaded. Please refresh the page and try again.');
+            }
+            
+            // Create our order with pending payment status
+            // Order ID will be generated by the server
+            const orderResponse = await fetch(`${API_BASE}/orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    items: orderItems,
+                    customerInfo: customerInfo,
+                    storeSlug: storeSlug,
+                    paymentMethod: 'online',
+                    paymentStatus: 'pending',
+                    razorpayOrderId: razorpayOrderId
+                })
+            });
+            
+            if (!orderResponse.ok) {
+                const errorData = await orderResponse.json();
+                throw new Error(errorData.error || 'Failed to create order');
+            }
+            
+            const orderResult = await orderResponse.json();
+            const orderId = orderResult.order.id; // Get the generated order ID from server
+            
+            // Get Razorpay key from server
+            let razorpayKey = null;
+            try {
+                const keyResponse = await fetch(`${API_BASE}/razorpay/key/${storeSlug}`);
+                if (keyResponse.ok) {
+                    const keyData = await keyResponse.json();
+                    razorpayKey = keyData.key;
+                } else {
+                    throw new Error('Failed to get Razorpay key');
+                }
+            } catch (error) {
+                console.error('Failed to fetch Razorpay key:', error);
+                throw new Error('Failed to initialize payment gateway');
+            }
+            
+            // Initialize Razorpay checkout
+            const options = {
+                key: razorpayKey,
+                amount: razorpayData.order.amount,
+                currency: razorpayData.order.currency,
+                name: paymentSettings?.storeName || 'Store',
+                description: `Order ${orderId}`,
+                order_id: razorpayOrderId,
+                prefill: {
+                    name: customerInfo.name,
+                    email: customerInfo.email,
+                    contact: customerInfo.phone
+                },
+                handler: async function(response) {
+                    // Payment successful
+                    try {
+                        // Verify payment
+                        const verifyResponse = await fetch(`${API_BASE}/razorpay/verify-payment`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                order_id: orderId,
+                                storeSlug: storeSlug
+                            })
+                        });
+                        
+                        if (verifyResponse.ok) {
+                            alert('Payment successful! Order ID: ' + orderId);
+                            // Remove only available items from cart
+                            cart = cart.filter(item => item.outOfStock);
+                            saveCart();
+                            updateCartUI();
+                            closeCheckoutModal();
+                            loadProducts(storeSlug);
+                        } else {
+                            const errorData = await verifyResponse.json();
+                            throw new Error(errorData.error || 'Payment verification failed');
+                        }
+                    } catch (error) {
+                        console.error('Error verifying payment:', error);
+                        alert('Payment successful but verification failed. Please contact support with Order ID: ' + orderId);
+                    }
+                },
+                modal: {
+                    ondismiss: function() {
+                        console.log('Payment modal dismissed by user');
+                    }
+                }
+            };
+            
+            // Create Razorpay instance and open checkout
+            try {
+                const rzp = new Razorpay(options);
+                
+                rzp.on('payment.failed', function(response) {
+                    console.error('Payment failed:', response);
+                    const errorMsg = response.error ? (response.error.description || response.error.reason || 'Unknown error') : 'Payment failed';
+                    alert('Payment failed. Error: ' + errorMsg + '\n\nOrder ID: ' + orderId + '\nYou can retry payment or contact support.');
+                });
+                
+                // Open Razorpay checkout
+                rzp.open();
+                
+                // Close the checkout modal since Razorpay will handle the payment UI
+                closeCheckoutModal();
+                
+            } catch (rzpError) {
+                console.error('Error initializing Razorpay:', rzpError);
+                throw new Error('Failed to initialize payment gateway: ' + rzpError.message);
+            }
+            
+        } catch (error) {
+            console.error('Error processing online payment:', error);
+            if (confirm('Error processing payment: ' + error.message + '\n\nWould you like to try Cash on Delivery instead?')) {
+                // Switch to COD
+                const codRadio = document.querySelector('input[name="payment-method"][value="cod"]');
+                if (codRadio) {
+                    codRadio.checked = true;
+                    submitOrder(event);
+                }
+            }
         }
-    } catch (error) {
-        console.error('Error placing order:', error);
-        alert('Error placing order. Please try again.');
     }
 }
 
@@ -588,10 +887,6 @@ function displayContactDetails() {
     
     if (paymentSettings.address) {
         html += `<p><strong>📍 Address:</strong><br>${paymentSettings.address.replace(/\n/g, '<br>')}</p>`;
-    }
-    
-    if (paymentSettings.gstin) {
-        html += `<p><strong>🏢 GSTIN:</strong> ${paymentSettings.gstin}</p>`;
     }
     
     // UPI ID is disabled, so don't show it

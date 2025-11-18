@@ -168,10 +168,26 @@ The application uses the following PostgreSQL tables:
 - **order_items**: Stores order line items (id, order_id, product_id, quantity, product_name, product_price)
 - **store_details**: Stores store configuration (single row with store name, contact info, UPI ID, etc.)
 
+## Deployment
+
+For deploying to Render (or other cloud platforms), see [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions.
+
+### Quick Deployment Checklist
+
+1. Push code to GitHub
+2. Set up PostgreSQL database on Render
+3. Run database migrations (see `migrations/RENDER_MIGRATION_GUIDE.md`)
+4. Configure environment variables:
+   - `DATABASE_URL` (or individual DB variables)
+   - `JWT_SECRET` (generate with `openssl rand -base64 32`)
+   - `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`)
+5. Deploy web service on Render
+6. Link database to web service
+
 ## Future Enhancements
 
-- User authentication
-- Payment gateway integration
+- User authentication ✅
+- Payment gateway integration ✅ (Razorpay)
 - Email notifications
 - Product image upload
 - Advanced analytics

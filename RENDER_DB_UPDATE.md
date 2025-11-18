@@ -1,6 +1,33 @@
 # Simple Instructions: Update Render Database
 
-## Step 1: Open Render Database Terminal
+## Method 1: Using External Database URL (Recommended)
+
+If you have the external database URL, use this method:
+
+1. **Get External Database URL:**
+   - Go to Render Dashboard → Your PostgreSQL database → Connect
+   - Copy the **"External Database URL"**
+
+2. **Run from your computer:**
+   ```bash
+   # Navigate to your project folder
+   cd D:\supermartweb
+   
+   # Run each migration (replace YOUR_URL with your actual URL)
+   psql "YOUR_EXTERNAL_URL" -f migrations/012_add_payment_fields_to_orders.sql
+   psql "YOUR_EXTERNAL_URL" -f migrations/013_add_razorpay_keys_to_store_details.sql
+   psql "YOUR_EXTERNAL_URL" -f migrations/014_remove_unused_bank_details_columns.sql
+   psql "YOUR_EXTERNAL_URL" -f migrations/015_remove_gstin_from_store_details.sql
+   psql "YOUR_EXTERNAL_URL" -f migrations/016_add_minimum_order_value.sql
+   ```
+
+   **OR connect manually:**
+   ```bash
+   psql "YOUR_EXTERNAL_URL"
+   ```
+   Then copy-paste the SQL blocks below.
+
+## Method 2: Using Render Web Terminal
 
 1. Go to [Render Dashboard](https://dashboard.render.com/)
 2. Click on your **PostgreSQL database**
